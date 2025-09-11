@@ -1,0 +1,21 @@
+nodes:
+  file:
+    include:
+      - main.py
+      - utils.py
+  package:
+    include:
+      - requests
+      - numpy
+      - os
+edges:
+  imports_local:
+    - [main.py, utils.py]
+  imports_package:
+    - [main.py, requests]
+    - [main.py, os]
+  uses_component:
+    - [main.py, os.path]
+  contains_component:
+    - [os, os.path]
+

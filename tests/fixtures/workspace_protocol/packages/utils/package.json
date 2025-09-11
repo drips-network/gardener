@@ -1,0 +1,9 @@
+{
+  "name": "@workspace/utils",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "date-fns": "^2.29.0",
+    "ramda": "^0.28.0"
+  }
+}

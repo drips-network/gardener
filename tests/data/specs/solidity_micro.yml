@@ -1,0 +1,19 @@
+nodes:
+  file:
+    include:
+      - contracts/MyToken.sol
+      - contracts/BaseToken.sol
+  package:
+    include:
+      - '@openzeppelin/contracts'
+      - 'solmate'
+edges:
+  imports_local:
+    - [contracts/MyToken.sol, contracts/BaseToken.sol]
+  imports_package:
+    - [contracts/BaseToken.sol, '@openzeppelin/contracts']
+  uses_component:
+    - [contracts/BaseToken.sol, '@openzeppelin/contracts.token/ERC20/ERC20']
+  contains_component:
+    - ['@openzeppelin/contracts', '@openzeppelin/contracts.token/ERC20/ERC20']
+

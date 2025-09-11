@@ -1,0 +1,12 @@
+{
+  "name": "@infra/monitoring",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "jest": "^27.5.0",
+    "lodash": "^4.17.21",
+    "uuid": "^9.0.0",
+    "axios": "^0.26.0",
+    "react": "^16.14.0"
+  }
+}

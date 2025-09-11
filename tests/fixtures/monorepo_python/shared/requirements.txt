@@ -1,0 +1,6 @@
+# Shared libraries
+pydantic==1.9.0  # Same as API
+requests==2.28.0
+httpx==0.22.0  # Different than API v2
+cryptography==37.0.2
+pyjwt==2.4.0

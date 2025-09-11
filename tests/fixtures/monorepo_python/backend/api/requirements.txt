@@ -1,0 +1,7 @@
+# API requirements
+fastapi==0.78.0
+uvicorn==0.17.6
+pydantic==1.9.0
+sqlalchemy==1.4.36
+alembic==1.7.7
+redis==4.0.0  # Different version than root

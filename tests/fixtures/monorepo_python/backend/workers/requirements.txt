@@ -1,0 +1,7 @@
+# Worker requirements
+celery==5.2.3  # Slightly newer than backend
+redis==3.5.3  # Same as root
+boto3==1.24.0
+pandas==1.4.2
+numpy==1.22.3
+scikit-learn==1.0.2

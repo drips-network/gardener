@@ -1,0 +1,10 @@
+{
+  "name": "@circular/package-c",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@circular/package-a": "workspace:*",
+    "react": "^18.2.0",
+    "uuid": "^9.0.0"
+  }
+}

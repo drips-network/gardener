@@ -1,0 +1,5 @@
+# Python build tools
+invoke==1.7.1
+fabric==2.7.0
+poetry==1.2.0
+tox==3.25.0

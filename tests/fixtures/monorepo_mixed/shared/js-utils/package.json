@@ -1,0 +1,11 @@
+{
+  "name": "@mycompany/js-utils",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "moment": "^2.29.0",
+    "uuid": "^9.0.0"
+  }
+}

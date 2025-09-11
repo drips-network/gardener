@@ -1,0 +1,13 @@
+{
+  "name": "@data/data-sync-service",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "moment": "^2.29.0",
+    "lodash": "^4.17.15",
+    "typescript": "^4.9.0",
+    "babel": "^7.18.0",
+    "react": "^18.2.0",
+    "webpack": "^5.70.0"
+  }
+}

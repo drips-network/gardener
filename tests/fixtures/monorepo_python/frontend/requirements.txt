@@ -1,0 +1,7 @@
+# Frontend requirements (Python-based dashboard)
+streamlit==1.10.0
+plotly==5.8.0
+dash==2.5.0
+pandas==1.4.2  # Same as workers
+numpy==1.21.0  # Different version than workers
+altair==4.2.0

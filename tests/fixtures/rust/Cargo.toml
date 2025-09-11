@@ -1,0 +1,16 @@
+[package]
+name = "rust-fixture"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+# Add other example dependencies if used in fixtures
+
+# Example dev dependency
+# [dev-dependencies]
+# pretty_assertions = "1.2"

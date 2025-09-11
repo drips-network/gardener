@@ -1,0 +1,13 @@
+{
+  "name": "@data/search-service",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "jest": "^27.5.0",
+    "webpack": "^5.70.0",
+    "uuid": "^7.0.3",
+    "express": "^4.18.2",
+    "axios": "^1.4.0",
+    "lodash": "^4.17.15"
+  }
+}

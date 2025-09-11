@@ -1,0 +1,13 @@
+{
+  "name": "mobile-app",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "18.2.0",
+    "react-native": "0.71.0",
+    "lodash": "^3.10.1",
+    "axios": "^0.27.0",
+    "@react-navigation/native": "^6.1.0",
+    "react-native-grpc": "^1.0.0"
+  }
+}

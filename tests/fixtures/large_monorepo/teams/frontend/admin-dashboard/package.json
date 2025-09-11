@@ -1,0 +1,17 @@
+{
+  "name": "@frontend/admin-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "uuid": "^8.3.2",
+    "lodash": "^3.10.1",
+    "moment": "^2.28.0",
+    "webpack": "^5.75.0",
+    "react": "^16.14.0",
+    "axios": "^0.26.0",
+    "express": "^4.17.1",
+    "babel": "^7.22.0",
+    "@platform/billing-service": "workspace:*",
+    "@platform/auth-service": "workspace:*"
+  }
+}

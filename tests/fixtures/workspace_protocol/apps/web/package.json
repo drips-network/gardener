@@ -1,0 +1,12 @@
+{
+  "name": "web-app",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@workspace/core": "workspace:*",
+    "@workspace/ui": "workspace:*",
+    "next": "^13.4.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}

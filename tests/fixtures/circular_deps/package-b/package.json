@@ -1,0 +1,10 @@
+{
+  "name": "@circular/package-b",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@circular/package-c": "workspace:*",
+    "axios": "^1.4.0",
+    "moment": "^2.29.0"
+  }
+}

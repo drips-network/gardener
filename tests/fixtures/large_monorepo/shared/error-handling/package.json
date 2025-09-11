@@ -1,0 +1,11 @@
+{
+  "name": "@shared/error-handling",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "jest": "^28.1.0",
+    "webpack": "^5.70.0",
+    "uuid": "^7.0.3",
+    "lodash": "^4.17.15"
+  }
+}

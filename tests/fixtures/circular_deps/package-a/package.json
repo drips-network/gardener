@@ -1,0 +1,10 @@
+{
+  "name": "@circular/package-a",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@circular/package-b": "workspace:*",
+    "express": "^4.18.0",
+    "lodash": "^4.17.21"
+  }
+}

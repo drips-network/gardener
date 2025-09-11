@@ -1,0 +1,11 @@
+{
+  "name": "@workspace/ui",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@workspace/core": "workspace:^",
+    "@workspace/utils": "workspace:~",
+    "react": "^18.2.0",
+    "styled-components": "^5.3.0"
+  }
+}

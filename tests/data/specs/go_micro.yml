@@ -1,0 +1,15 @@
+nodes:
+  file:
+    include:
+      - main.go
+      - utils/helpers.go
+  package:
+    include:
+      - github.com/gin-gonic/gin
+      - fmt
+edges:
+  imports_local:
+    - [main.go, utils/helpers.go]
+  imports_package:
+    - [main.go, github.com/gin-gonic/gin]
+

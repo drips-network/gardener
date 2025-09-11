@@ -1,0 +1,11 @@
+{
+    // This is a single-line comment
+    "compilerOptions": {
+        "baseUrl": "./src", /* This is a
+        multi-line comment */
+        "paths": {
+            "@components/*": ["components/*"],
+            "$utils/*": ["utils/common/*"]
+        }
+    }
+}

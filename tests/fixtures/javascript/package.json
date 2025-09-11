@@ -1,0 +1,25 @@
+{
+    "name": "js-fixture",
+    "version": "1.0.0",
+    "description": "Test fixtures for JavaScript import/require analysis.",
+    "main": "server.js",
+    "type": "commonjs",
+    "scripts": {
+        "start": "node server.js"
+    },
+    "dependencies": {
+        "chalk": "^5.3.0",
+        "express": "^4.19.2",
+        "lodash": "^4.17.21",
+        "moment": "^2.30.1",
+        "uuid": "^9.0.1"
+    },
+    "devDependencies": {},
+    "keywords": [
+        "test",
+        "fixture",
+        "javascript"
+    ],
+    "author": "Gardener Test Suite",
+    "license": "ISC"
+}

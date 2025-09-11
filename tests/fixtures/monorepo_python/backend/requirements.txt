@@ -1,0 +1,7 @@
+# Backend requirements
+Django==4.0.0  # Different version than root
+djangorestframework==3.13.1
+celery==5.2.0  # Different version than root
+kombu==5.2.0
+pymongo==4.0.1
+elasticsearch==7.15.0

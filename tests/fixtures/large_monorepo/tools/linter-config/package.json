@@ -1,0 +1,10 @@
+{
+  "name": "@tools/linter-config",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "babel": "^7.22.0",
+    "jest": "^27.5.0",
+    "uuid": "^7.0.3"
+  }
+}

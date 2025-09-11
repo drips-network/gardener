@@ -1,0 +1,13 @@
+{
+  "name": "@data/etl-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "^17.0.2",
+    "jest": "^27.5.0",
+    "axios": "^0.26.0",
+    "babel": "^7.22.0",
+    "webpack": "^5.75.0",
+    "moment": "^2.29.4"
+  }
+}

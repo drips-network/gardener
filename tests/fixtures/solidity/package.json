@@ -1,0 +1,13 @@
+{
+    "name": "solidity-fixture",
+    "version": "1.0.0",
+    "description": "Solidity test fixture for Gardener",
+    "dependencies": {
+        "@openzeppelin/contracts": "^4.8.0",
+        "forge-std": "1.5.6",
+        "solmate": "6.7.0"
+    },
+    "devDependencies": {
+        "hardhat": "^2.12.0"
+    }
+}

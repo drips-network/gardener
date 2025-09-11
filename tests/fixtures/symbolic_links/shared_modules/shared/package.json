@@ -1,0 +1,8 @@
+{
+  "name": "@symtest/shared",
+  "version": "1.0.0",
+  "dependencies": {
+    "uuid": "^9.0.0",
+    "date-fns": "^2.29.0"
+  }
+}

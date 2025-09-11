@@ -1,0 +1,12 @@
+{
+  "name": "mobile-app",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@workspace/core": "workspace:*",
+    "@workspace/ui": "workspace:*",
+    "react": "18.2.0",
+    "react-native": "0.71.0",
+    "expo": "~48.0.0"
+  }
+}

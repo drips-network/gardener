@@ -1,0 +1,14 @@
+{
+  "name": "@platform/session-service",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "moment": "^2.29.4",
+    "webpack": "^5.88.0",
+    "jest": "^27.5.0",
+    "react": "^17.0.2",
+    "lodash": "^4.17.20",
+    "babel": "^7.22.0",
+    "uuid": "^9.0.0"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@frontend/partner-portal",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "uuid": "^7.0.3",
+    "express": "^4.17.1",
+    "babel": "^7.22.0",
+    "moment": "^2.29.4",
+    "typescript": "^4.7.0",
+    "lodash": "^4.17.21",
+    "react": "^18.2.0",
+    "axios": "^1.4.0",
+    "@platform/user-service": "workspace:*",
+    "@platform/auth-service": "workspace:*"
+  }
+}

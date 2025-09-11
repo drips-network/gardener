@@ -1,0 +1,20 @@
+nodes:
+  file:
+    include:
+      - src/main.rs
+      - src/utils.rs
+  package:
+    include:
+      - tokio
+      - serde
+      - std
+edges:
+  imports_local:
+    - [src/main.rs, src/utils.rs]
+  imports_package:
+    - [src/main.rs, tokio]
+  uses_component:
+    - [src/main.rs, tokio::main]
+  contains_component:
+    - [tokio, tokio::main]
+

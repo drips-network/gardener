@@ -1,0 +1,17 @@
+{
+  "name": "@frontend/analytics-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "express": "^4.17.1",
+    "typescript": "^4.9.0",
+    "jest": "^28.1.0",
+    "babel": "^7.18.0",
+    "moment": "^2.29.0",
+    "lodash": "^4.17.15",
+    "uuid": "^8.3.2",
+    "react": "^18.2.0",
+    "@platform/user-service": "workspace:*",
+    "@platform/billing-service": "workspace:*"
+  }
+}

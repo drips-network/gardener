@@ -1,0 +1,10 @@
+{
+  "name": "@tools/dev-server",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "lodash": "^4.17.20",
+    "babel": "^7.22.0",
+    "uuid": "^8.3.2"
+  }
+}

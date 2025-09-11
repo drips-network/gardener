@@ -1,0 +1,14 @@
+{
+  "name": "@platform/payment-service",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "express": "^4.17.1",
+    "babel": "^7.22.0",
+    "uuid": "^9.0.0",
+    "axios": "^0.26.0",
+    "webpack": "^5.70.0",
+    "jest": "^28.1.0",
+    "typescript": "^4.7.0"
+  }
+}

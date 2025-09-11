@@ -1,0 +1,17 @@
+{
+  "name": "@frontend/onboarding-app",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "typescript": "^4.9.0",
+    "axios": "^0.26.0",
+    "webpack": "^5.88.0",
+    "lodash": "^4.17.15",
+    "uuid": "^7.0.3",
+    "jest": "^28.1.0",
+    "react": "^18.2.0",
+    "express": "^4.18.0",
+    "@platform/auth-service": "workspace:*",
+    "@platform/billing-service": "workspace:*"
+  }
+}

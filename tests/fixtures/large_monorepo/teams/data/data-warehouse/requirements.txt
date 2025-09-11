@@ -1,0 +1,5 @@
+dask==2022.10.0
+sqlalchemy==1.4.40
+tensorflow==2.10.0
+pandas==1.5.0
+pytorch==1.12.0

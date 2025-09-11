@@ -1,0 +1,17 @@
+{
+  "name": "@frontend/checkout-flow",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "lodash": "^4.17.15",
+    "babel": "^7.20.0",
+    "axios": "^0.26.0",
+    "jest": "^28.1.0",
+    "express": "^4.17.1",
+    "webpack": "^5.70.0",
+    "uuid": "^9.0.0",
+    "react": "^16.14.0",
+    "@platform/auth-service": "workspace:*",
+    "@platform/billing-service": "workspace:*"
+  }
+}

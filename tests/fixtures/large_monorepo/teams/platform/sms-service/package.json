@@ -1,0 +1,14 @@
+{
+  "name": "@platform/sms-service",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "webpack": "^5.70.0",
+    "lodash": "^4.17.15",
+    "jest": "^27.5.0",
+    "moment": "^2.29.0",
+    "uuid": "^8.3.2",
+    "express": "^4.18.0",
+    "axios": "^1.4.0"
+  }
+}

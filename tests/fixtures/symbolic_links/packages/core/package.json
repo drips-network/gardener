@@ -1,0 +1,8 @@
+{
+  "name": "@symtest/core",
+  "version": "1.0.0",
+  "dependencies": {
+    "@symtest/shared": "workspace:*",
+    "lodash": "^4.17.21"
+  }
+}

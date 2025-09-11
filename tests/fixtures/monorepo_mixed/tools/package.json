@@ -1,0 +1,15 @@
+{
+  "name": "build-tools",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "webpack": "^5.74.0",
+    "rollup": "^2.77.0",
+    "esbuild": "^0.15.0",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.18.0",
+    "@babel/preset-env": "^7.18.0"
+  }
+}

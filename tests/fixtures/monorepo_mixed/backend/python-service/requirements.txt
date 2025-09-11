@@ -1,0 +1,7 @@
+# Python backend service
+flask==2.1.0
+grpcio==1.47.0
+protobuf==4.21.0  # Cross-language dependency
+redis==4.3.0
+sqlalchemy==1.4.39
+psycopg2==2.9.3

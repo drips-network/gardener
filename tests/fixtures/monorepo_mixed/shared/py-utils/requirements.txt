@@ -1,0 +1,5 @@
+# Shared Python utilities
+python-dateutil==2.8.2
+pytz==2022.1
+pyyaml==6.0
+ujson==5.4.0

@@ -1,0 +1,9 @@
+{
+  "name": "@symtest/web",
+  "version": "1.0.0",
+  "dependencies": {
+    "@symtest/core": "workspace:*",
+    "@symtest/shared": "workspace:*",
+    "react": "^18.2.0"
+  }
+}

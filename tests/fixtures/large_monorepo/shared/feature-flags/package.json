@@ -1,0 +1,11 @@
+{
+  "name": "@shared/feature-flags",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "axios": "^0.26.0",
+    "babel": "^7.20.0",
+    "react": "^16.14.0",
+    "lodash": "^3.10.1"
+  }
+}

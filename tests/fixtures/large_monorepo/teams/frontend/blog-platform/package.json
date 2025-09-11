@@ -1,0 +1,17 @@
+{
+  "name": "@frontend/blog-platform",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "moment": "^2.29.0",
+    "babel": "^7.18.0",
+    "react": "^17.0.2",
+    "express": "^4.17.1",
+    "uuid": "^7.0.3",
+    "webpack": "^5.70.0",
+    "typescript": "^4.9.0",
+    "lodash": "^3.10.1",
+    "@platform/auth-service": "workspace:*",
+    "@platform/billing-service": "workspace:*"
+  }
+}

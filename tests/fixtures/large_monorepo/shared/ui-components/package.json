@@ -1,0 +1,11 @@
+{
+  "name": "@shared/ui-components",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "webpack": "^5.70.0",
+    "jest": "^28.1.0",
+    "uuid": "^8.3.2",
+    "babel": "^7.20.0"
+  }
+}

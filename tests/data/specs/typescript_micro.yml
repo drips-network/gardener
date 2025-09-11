@@ -1,0 +1,20 @@
+nodes:
+  file:
+    include:
+      - main.ts
+      - components/Button.tsx
+  package:
+    include:
+      - react
+      - axios
+      - fs
+edges:
+  imports_local:
+    - [main.ts, components/Button.tsx]
+  imports_package:
+    - [main.ts, react]
+  uses_component:
+    - [components/Button.tsx, react.Component]
+  contains_component:
+    - [react, react.Component]
+

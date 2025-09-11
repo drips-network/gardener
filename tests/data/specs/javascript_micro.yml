@@ -1,0 +1,21 @@
+nodes:
+  file:
+    include:
+      - server.js
+      - utils.js
+  package:
+    include:
+      - express
+      - lodash
+      - fs
+edges:
+  imports_local:
+    - [server.js, utils.js]
+  imports_package:
+    - [server.js, express]
+    - [server.js, fs]
+  uses_component:
+    - [server.js, express.Router]
+  contains_component:
+    - [express, express.Router]
+
