@@ -1,0 +1,55 @@
+# Python general
+**/__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+
+# Python Distribution / Packaging
+*.egg-info/
+dist/
+build/
+wheels/
+*.tar.gz
+*.whl
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+VENV/
+test_env/
+
+# Jupyter Notebook
+**/.ipynb_checkpoints/
+
+# Linters / OS / Editor specific
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+
+# Directories generated on the fly
+output/
+input/
+
+# Node.js specific for helper scripts
+gardener/external_helpers/**/node_modules/
+
+# Test and coverage artifacts
+.pytest_cache/
+.tox/
+.mypy_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Other logs and caches
+*.log
+.cache/
+
+# uv project lock
+uv.lock

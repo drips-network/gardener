@@ -1,0 +1,113 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: gardener-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gardener_db}
+      POSTGRES_USER: ${POSTGRES_USER:-gardener}
+      # Require an explicit password via .env or environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - gardener-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gardener} -d ${POSTGRES_DB:-gardener_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: gardener-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - gardener-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Service
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: gardener-api
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-gardener}:${POSTGRES_PASSWORD?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-gardener_db}
+      - REDIS_URL=redis://redis:6379/0
+      # Require explicit HMAC secret; no default in compose
+      - HMAC_SHARED_SECRET=${HMAC_SHARED_SECRET?HMAC_SHARED_SECRET is required}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-true}
+    ports:
+      - "8000:8000"
+    networks:
+      - gardener-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./services:/app/services
+      - ./gardener:/app/gardener
+    command: >
+      sh -c "
+        echo 'Starting API server...' && \
+        uvicorn services.api.app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  # Worker Service
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    container_name: gardener-worker
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-gardener}:${POSTGRES_PASSWORD?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-gardener_db}
+      - REDIS_URL=redis://redis:6379/0
+      - HMAC_SHARED_SECRET=${HMAC_SHARED_SECRET?HMAC_SHARED_SECRET is required}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-true}
+    networks:
+      - gardener-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
+    volumes:
+      - ./services:/app/services
+      - ./gardener:/app/gardener
+      - worker_data:/app/workdir
+
+# Networks
+networks:
+  gardener-network:
+    driver: bridge
+
+# Volumes
+volumes:
+  postgres_data:
+  redis_data:
+  worker_data:

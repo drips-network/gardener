@@ -1,0 +1,72 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Testing
+.pytest_cache
+.coverage
+htmlcov/
+.tox/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+# Do NOT exclude the specific Dockerfiles from the build context
+Dockerfile*
+!.devcontainer/Dockerfile
+!services/api/Dockerfile
+!services/worker/Dockerfile
+# Compose files are not part of image contexts, but some builders scan them
+docker-compose*.yml
+!docker-compose.yml
+
+# Output files
+output/
+
+# Development files
+tests/
+scripts/
+
+# Node modules (from external helpers)
+node_modules/
+
+# Development container config
+.devcontainer/

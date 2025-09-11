@@ -1,0 +1,7 @@
+{
+  "name": "gardener-dev",
+  "build": { "dockerfile": "Dockerfile" },
+  "remoteUser": "vscode",
+  "postCreateCommand": "python -V && uv pip install -e '.[dev,test]' || true",
+  "customizations": { "vscode": { "extensions": ["ms-python.python","ms-python.vscode-pylance"] } }
+}

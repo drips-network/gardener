@@ -1,0 +1,15 @@
+{
+  "name": "hardhat-config-parser",
+  "version": "1.0.0",
+  "description": "Helper script for Gardener to parse Hardhat configuration files to extract remappings",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.0",
+    "@types/node": "^20.12.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
