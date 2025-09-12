@@ -5,13 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "gardener"
 version = "0.1.0"
-description = "Automated static analysis and dependecy graph centrality analysis for recommendation of OSS dependency funding splits to be distributed via the Drips Network"
-readme = "README.md"
-requires-python = ">=3.9,<3.12"
+description = "Automated static analysis and dependency graph centrality analysis for recommendation of OSS dependency funding splits to be distributed via the Drips Network"
+requires-python = ">=3.9,<3.13"
 authors = [
   { name = "Warren Winter" }
 ]
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 
 dependencies = [
   "GitPython==3.1.44",

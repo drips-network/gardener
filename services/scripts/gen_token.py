@@ -9,11 +9,12 @@ Usage:
       python services/scripts/gen_token.py --url github.com/owner/repo --secret <32+ chars>
 
 Options:
-  --url / -u            Repository URL used in the token payload
-  --secret / -s         Shared secret (falls back to env HMAC_SHARED_SECRET)
-  --expiry / -e         Expiry seconds from now (default: 300)
-  --print-curl          Print a ready-to-run curl for /analyses/run
-  --print-headers       Print Authorization and X-Repo-Url headers
+  --url / -u             Repository URL used in the token payload
+  --secret / -s          Shared secret (falls back to env HMAC_SHARED_SECRET)
+  --expiry / -e          Expiry seconds from now (default: 300)
+  --api-base / -a        API base URL for curl output (default: http://localhost:8000; env GARDENER_API_BASE)
+  --print-curl           Print a ready-to-run curl for /analyses/run
+  --print-headers        Print Authorization and X-Repo-Url headers
 """
 import argparse
 import base64
@@ -43,6 +44,12 @@ def main():
         help="Shared secret (or set HMAC_SHARED_SECRET)",
     )
     p.add_argument("--expiry", "-e", type=int, default=300, help="Expiry in seconds (default: 300)")
+    p.add_argument(
+        "--api-base",
+        "-a",
+        default=os.environ.get("GARDENER_API_BASE", "http://localhost:8000"),
+        help="API base URL for curl output (default: http://localhost:8000)",
+    )
     p.add_argument("--print-curl", action="store_true", help="Print a curl example for /analyses/run")
     p.add_argument("--print-headers", action="store_true", help="Print Authorization and X-Repo-Url headers")
     args = p.parse_args()
@@ -60,7 +67,9 @@ def main():
 
     if args.print_curl:
         print("\n# curl:")
-        print('curl -X POST "http://localhost:8000/api/v1/analyses/run" \\')
+        base = str(args.api_base).rstrip("/")
+        endpoint = f"{base}/api/v1/analyses/run"
+        print(f'curl -X POST "{endpoint}" \\')
         print(f'  -H "Authorization: Bearer {token}" \\')
         print(f'  -H "X-Repo-Url: {args.url}" \\')
         print('  -H "Content-Type: application/json" \\')

@@ -1,7 +1,7 @@
 """
 Configuration management using Pydantic Settings
 """
-
+import os
 from typing import Optional
 
 from pydantic import Field, field_validator
@@ -224,7 +224,10 @@ class Settings(BaseSettings):
             raise ValueError("DEBUG must be false in production")
 
         # 2) Do not allow wildcard hosts in production
-        if self.api.ALLOWED_HOSTS == ["*"]:
+        # Prefer the raw env var if present to avoid nested settings timing issues
+        hosts_env = os.getenv("ALLOWED_HOSTS")
+        hosts_raw = hosts_env if hosts_env is not None else self.api.ALLOWED_HOSTS_RAW
+        if str(hosts_raw).strip() == "*":
             raise ValueError("ALLOWED_HOSTS must not be '*' in production")
 
 

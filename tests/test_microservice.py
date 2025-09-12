@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 # Configuration
-API_URL = "http://localhost:8000"
+API_URL = os.environ.get("API_URL") or "http://localhost:8000"
 raw = os.environ.get("HMAC_SHARED_SECRET")
 SHARED_SECRET = (raw or "").encode("utf-8")
 if not SHARED_SECRET:
