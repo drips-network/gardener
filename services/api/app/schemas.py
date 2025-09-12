@@ -91,14 +91,6 @@ class DripListItemResponse(BaseModel):
         return float(v)
 
 
-class AnalysisMetadataResponse(BaseModel):
-    """Metadata about the analysis"""
-
-    total_files: Optional[int]
-    languages_detected: Optional[List[str]]
-    analysis_duration_seconds: Optional[float]
-
-
 class AnalysisResultsResponse(BaseModel):
     """Complete analysis results"""
 
@@ -107,7 +99,6 @@ class AnalysisResultsResponse(BaseModel):
     commit_sha: str
     completed_at: datetime
     results: List[DripListItemResponse]
-    metadata: Optional[AnalysisMetadataResponse]
 
     pass
 

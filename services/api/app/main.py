@@ -23,7 +23,6 @@ from starlette.responses import JSONResponse as StarletteJSONResponse
 from gardener.common.subprocess import SecureSubprocess
 from gardener.common.utils import get_logger
 from services.api.app.schemas import (
-    AnalysisMetadataResponse,
     AnalysisResultsResponse,
     AnalysisRunRequest,
     AnalysisRunResponse,
@@ -371,7 +370,7 @@ async def get_latest_results(repository_id: UUID, db: Session = Depends(get_db))
     # Find the latest completed job with eager loading of related data
     job = (
         db.query(AnalysisJob)
-        .options(joinedload(AnalysisJob.drip_list_items), joinedload(AnalysisJob.analysis_metadata))
+        .options(joinedload(AnalysisJob.drip_list_items))
         .filter(AnalysisJob.repository_id == repository_id, AnalysisJob.status == JobStatus.COMPLETED)
         .order_by(AnalysisJob.completed_at.desc())
         .first()
@@ -390,25 +389,12 @@ async def get_latest_results(repository_id: UUID, db: Session = Depends(get_db))
         for item in job.drip_list_items
     ]
 
-    metadata = None
-    if job.analysis_metadata:
-        metadata = AnalysisMetadataResponse(
-            total_files=job.analysis_metadata.total_files,
-            languages_detected=job.analysis_metadata.languages_detected,
-            analysis_duration_seconds=(
-                float(job.analysis_metadata.analysis_duration_seconds)
-                if job.analysis_metadata.analysis_duration_seconds
-                else None
-            ),
-        )
-
     return AnalysisResultsResponse(
         job_id=job.id,
         repository_id=job.repository_id,
         commit_sha=job.commit_sha,
         completed_at=job.completed_at,
         results=drip_list,
-        metadata=metadata,
     )
 
 
@@ -451,25 +437,12 @@ async def get_latest_results_by_url(repository_url: str, db: Session = Depends(g
         for item in job.drip_list_items
     ]
 
-    metadata = None
-    if job.analysis_metadata:
-        metadata = AnalysisMetadataResponse(
-            total_files=job.analysis_metadata.total_files,
-            languages_detected=job.analysis_metadata.languages_detected,
-            analysis_duration_seconds=(
-                float(job.analysis_metadata.analysis_duration_seconds)
-                if job.analysis_metadata.analysis_duration_seconds
-                else None
-            ),
-        )
-
     return AnalysisResultsResponse(
         job_id=job.id,
         repository_id=job.repository_id,
         commit_sha=job.commit_sha,
         completed_at=job.completed_at,
         results=drip_list,
-        metadata=metadata,
     )
 
 
