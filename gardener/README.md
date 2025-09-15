@@ -20,7 +20,7 @@ Type‑safe, deterministic static analysis that builds a multi-language dependen
     - [Resolution order](#resolution-order)
     - [Patterns and targets](#patterns-and-targets)
     - [File resolution](#file-resolution)
-    - [Examples](#examples)
+    - [Examples handled](#examples-handled)
 
 <br/>
 
@@ -209,22 +209,7 @@ Aliases are resolved in the following priority order:
 - Framework extras (e.g., `.svelte`, `.vue`)
 - `index.{ext}` for directory imports
 
-### Examples
-
-```json
-// tsconfig.json
-{
-  "compilerOptions": {
-    "baseUrl": "./src",
-    "paths": {
-      "@components/*": ["components/*"],
-      "@utils/*": ["utils/*"],
-      "@api": ["services/api/index.ts"],
-      "@shared/*": ["../shared/*"]
-    }
-  }
-}
-```
+### Examples handled
 
 ```typescript
 import Button from '@components/Button';
@@ -238,4 +223,19 @@ import api from '@api';
 
 import { Types } from '@shared/types';
 // Resolves to: ./shared/types.ts
+```
+
+`tsconfig.json`:
+```json
+{
+  "compilerOptions": {
+    "baseUrl": "./src",
+    "paths": {
+      "@components/*": ["components/*"],
+      "@utils/*": ["utils/*"],
+      "@api": ["services/api/index.ts"],
+      "@shared/*": ["../shared/*"]
+    }
+  }
+}
 ```

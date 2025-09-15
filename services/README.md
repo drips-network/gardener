@@ -192,7 +192,11 @@ GET /api/v1/repositories/results/latest?repository_url=github.com/owner/repo
       "package_url": "https://github.com/psf/requests",
       "split_percentage": 25.0000
     },
-    ...
+    {
+      "package_name": "requests",
+      "package_url": "https://github.com/sympy/sympy",
+      "split_percentage": 33.0000
+    }
   ]
 }
 ```
@@ -318,6 +322,7 @@ import crypto from "crypto";
 
 ```typescript
 // gardenerEnqueue.ts
+
 import { makeGardenerToken } from "path/to/gardenerAuth";
 
   export async function post(req, res) {
