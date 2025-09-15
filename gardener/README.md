@@ -65,11 +65,9 @@ See [README: Quick Start](../README.md#quick-start) for installation and basic u
    - Normalizes the final set to percentages summing to 100% (as needed for the [Drip Lists](https://docs.drips.network/support-your-dependencies/overview/) application)
 6. **Graph serialization and reporting**
    - [README: CLI](../README.md#cli-for-local-analysis) for output types
-   - Optionally, a HTML file with an interactive graph visualization can be produced (if `ipysigma` is installed (`.[viz]`)) with:
-     - Color-coded node types (see [Configuration](#configuration) below)
-     - Clickable nodes with metadata
-     - Zoom and pan controls
-     - Component relationships
+   - Optionally, a HTML file with an interactive graph visualization can be produced (if `ipysigma` is installed (`.[viz]`)).  Here is an example, from Gardener's analysis of [github.com/keras-team/keras/](https://github.com/keras-team/keras/)):
+
+![Keras import graph visualization](visualization/visualization-demo.gif)
 
 <br/>
 
