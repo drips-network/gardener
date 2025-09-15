@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+PYTHON ?= python3
 
 .PHONY: help dev-install dev-install-service js-helpers test compile-service-reqs compile-dev-reqs token lint type format validate
 
@@ -41,7 +42,7 @@ compile-dev-reqs:
 token:
 	@if [ -z "$$HMAC_SHARED_SECRET" ]; then echo "Set HMAC_SHARED_SECRET env var"; exit 1; fi
 	@if [ -z "$$REPO_URL" ]; then echo "Set REPO_URL env var"; exit 1; fi
-	python services/scripts/gen_token.py --url "$$REPO_URL"
+	$(PYTHON) services/scripts/gen_token.py --url "$$REPO_URL"
 
 lint:
 	uv run pylint gardener/ services/
