@@ -4,7 +4,7 @@ Gardener is a **static dependency analysis** tool that builds import graphs from
 
 > *"If you really want to be a good gardener, you need to understand what is going on in your soil." — Jeff Lowenfels*
 
-> *"Feed the soil, not the plant." — Jeff Lowenfels*
+> *"Feed the soil, not your plants!" — Charles Dowding*
 
 ⚠️ **Status**: actively developed. Interfaces may evolve.
 
