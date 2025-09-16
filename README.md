@@ -1,37 +1,30 @@
 # 🧤 Gardener
 
-Gardener is a **static dependency analysis** tool that builds import graphs from source and analyzes them to produce **recommendations for distributing OSS funding across each project's external dependencies** via [Drip Lists](https://docs.drips.network/support-your-dependencies/overview/).
+Gardener is a **static dependency analysis** tool that builds import graphs from any supported project's source code and analyzes them to produce **recommendations for distributing OSS funding across that project's external dependencies** via [Drip Lists](https://docs.drips.network/support-your-dependencies/overview/).
 
-> *"If you really want to be a good gardener, you need to understand what is going on in your soil." — Jeff Lowenfels*
+> *"If you really want to be a good gardener, you need to understand what is going on in your soil" — Jeff Lowenfels*
 
-> *"Feed the soil, not your plants!" — Charles Dowding*
+> *"Feed the soil, not your plants" — Charles Dowding*
 
 ⚠️ **Status**: actively developed. Interfaces may evolve.
 
-<br/>
-
 ## What Gardener does
 
-- **Scans a project's package manifests and code** (Javascript/Typescript, Python, Go, Rust, Solidity) and **builds a dependency graph** representing the static import relationships of the project's local files, external dependencies, and their components
-- **Computes and aggregates importance scores** (PageRank or Katz) over that graph
-- **Resolves external dependencies' repository URLs** (npm, PyPI, crates.io, Go proxy, Git submodules, GitHub/GitLab/Bitbucket normalization)
-- **Produces**:
-  - Recommended **Drip Lists** with normalized percentages, aggregated per canonical external dependency repo URL
-    - *NB: this feature currently only supports dependencies hosted on GitHub*
-  - JSON exports with **complete node-link graphs**
-  - Optional **interactive graph visualizations**
-- Runs as a **CLI** (analyze any local path or remote Git URL) or as a **microservice** (FastAPI + Celery + Redis + PostgreSQL)
-
-<br/>
+* **Scans a project's package manifests and code** (Javascript/Typescript, Python, Go, Rust, Solidity) and **builds a dependency graph** representing the static import relationships of the project's local files, external dependencies, and their components
+* **Computes and aggregates importance scores** (PageRank or Katz) over that graph
+* **Resolves external dependencies' repository URLs** (npm, PyPI, crates.io, Go proxy, Git submodules, GitHub/GitLab/Bitbucket normalization)
+* **Produces**:
+  * Recommended **Drip Lists** with normalized percentages, aggregated per external dependency's canonical repository URL
+  * JSON exports with **complete node-link graphs**
+  * Optional **interactive graph visualizations**
+* Runs as a **CLI** (analyze any local path or remote Git URL) or as a **microservice** (FastAPI + Celery + Redis + PostgreSQL)
 
 ## Documentation
 
 For complete documentation including installation, API reference, and deployment guides, see:
-- **[Core analysis modules and CLI](./gardener/README.md)** (`gardener/`)
-- **[API, worker, database models](./services/README.md)** (`services/`)
-- **[Tests](./tests/README.md)** (`tests/`)
-
-<br/>
+* **[Core analysis modules and CLI](./gardener/README.md)** (`gardener/`)
+* **[API, worker, database models](./services/README.md)** (`services/`)
+* **[Tests](./tests/README.md)** (`tests/`)
 
 ## Quick start
 
@@ -81,8 +74,6 @@ docker-compose up --build
 * Fetch latest results:
   * By `repository_id`: `GET /api/v1/repositories/{repository_id}/results/latest` (by `repository_id`)
   * Or by GitHub URL: `GET /api/v1/repositories/results/latest?repository_url=github.com/owner/repo`
-
-<br/>
 
 ## License
 

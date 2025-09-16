@@ -2,8 +2,6 @@
 
 Test suite covering language handlers, graph building, URL resolution, microservice endpoints, and robustness edge cases.
 
-<br/>
-
 ## Layers and markers
 
 - **Unit** (`-m unit`) — focused handlers/utilities, no network
@@ -14,8 +12,6 @@ Test suite covering language handlers, graph building, URL resolution, microserv
 - **Slow** (`-m slow`) — scale scenarios
 
 Markers are defined in [`pytest.ini`](../pytest.ini).
-
-<br/>
 
 ## Running
 
@@ -39,19 +35,15 @@ Or use the helper script:
 python tests/run_tests.py --unit|--integration|--fixtures|--system|--all [-v] [--include-slow]
 ```
 
-<br/>
-
 ## Determinism
 
 * **No live network**: registry/HTML fetches are stubbed via `tests.support.fixtures.offline_mode`
 * **Stable graph serialization**: nodes/edges are sorted
 * Resource limits and timeouts are enforced to avoid flakiness.
 
-<br/>
+## Further documentation
 
-## Fixture docs
-
-Each fixture has a README:
+Several fixtures have READMEs:
 
 * [tests/fixtures/circular\_deps/README.md](./fixtures/circular_deps/README.md)
 * [tests/fixtures/corrupted\_manifest/README.md](./fixtures/corrupted_manifest/README.md)

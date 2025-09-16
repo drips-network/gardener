@@ -23,8 +23,6 @@ REST API and background worker architecture for running Gardener's **[core depen
   - [API client examples](#api-client-examples)
     - [Typescript](#typescript)
 
-<br/>
-
 ## Architecture
 
 ```text
@@ -55,8 +53,6 @@ services/
 * **Worker** (Celery): asynchronous processing of analysis jobs (involving cloning repos, analyzing source, package URL resolution, results storage)
 * **Storage** (PostgreSQL): of job metadata, compressed dependency graphs, analysis results, and cached package URLs
 * **Message broker** (Redis): for job queue and rate limiting
-
-<br/>
 
 ## Quick start
 
@@ -94,8 +90,6 @@ curl -X POST "http://localhost:8000/api/v1/analyses/run" \
 python services/scripts/gen_token.py --url "$REPO_URL" --print-curl
 ```
 
-<br/>
-
 ## API endpoints
 
 ### Health check
@@ -132,8 +126,9 @@ X-Repo-Url: <repository-url>
 }
 ```
 * Authentication required (see [Local Development](#local-development-with-docker-compose) above)
-* `repo_url` must be prefixed with `https://`
-* `force_url_refresh` requires the worker to fetch fresh package URLs from registries for the project's external dependencies, overriding any cached URLs for those packges
+* `repo_url` — required — ⚠️ must be prefixed with `https://`
+* `force_url_refresh` — optional — if `true` (default is `false`), requires the worker to look up via package registries the repository URL of every external dependency in the project, and to overwrite those dependencies' URLs in the `package_url_cache` table
+* `drip_list_max_length` — optional — limits the maximum number of third-party GitHub-hosted dependencies in the final recommended Drip List. By default, it is set to 200. If set to some number below the total number of third-party GitHub-hosted dependencies of an analyzed project, the final list will be limited to that length, and the `split_percentage` values stored in the `drip_list_items` table (queried by the [Latest Results endpoint](#get-latest-results)) will be calculated such that the project's resulting limited set's `split_percentage` values sum to 100%
 
 **Response**:
 ```json
@@ -150,8 +145,9 @@ X-Repo-Url: <repository-url>
 ```http
 GET /api/v1/analyses/{job_id}
 ```
+* No authentication required
 * Use the `job_id` returned by **POST** `/api/v1/analyses/run`
-* No authentication required.
+
 
 **Response**:
 ```json
@@ -176,8 +172,9 @@ Or by repository URL:
 ```http
 GET /api/v1/repositories/results/latest?repository_url=github.com/owner/repo
 ```
-* `repository_url` can be prefixed with `https://`, but it is not required here
 * No authentication required
+* `repository_url` may be prefixed with `https://`, but `repository_url` at this endpoint also accepts `forge.com/owner/repo` patterns
+* ⚠️ The scored dependencies in the final recommended Drip List are limited to dependencies hosted on GitHub, as currently GitHub is the only forge that Drips's funding and claiming flows support
 
 **Response**:
 ```json
@@ -200,8 +197,6 @@ GET /api/v1/repositories/results/latest?repository_url=github.com/owner/repo
   ]
 }
 ```
-
-<br/>
 
 ## Deployment example (Railway, Nixpacks)
 
@@ -233,8 +228,6 @@ Create two services (API + Worker) pointing to this repository, add PostgreSQL a
   `ALLOWED_HOSTS` (any non-"\*"),
   `NIXPACKS_PKGS=git nodejs_20` (`git` is required for cloning; `nodejs_20` is needed if you build the Hardhat TS remappings helper)
 
-<br/>
-
 ## Operational notes
 
 * **Idempotency**: resubmitting the same repo while a job is `RUNNING` returns the existing job. New submissions after completion create new jobs
@@ -243,8 +236,6 @@ Create two services (API + Worker) pointing to this repository, add PostgreSQL a
 * **Security**: use HTTPS and set `ALLOWED_HOSTS` to your domain(s). Keep `DEBUG=false` in production
 * **URL caching**: external dependencies' repository URLs are cached in `package_url_cache`; when a job is submitted with the `--force_url_refresh` flag, cached repo URLs will get overwritten by newly fetched matches
 
-<br/>
-
 ## Database schema
 
 ### Core tables
@@ -252,6 +243,7 @@ Create two services (API + Worker) pointing to this repository, add PostgreSQL a
 * **repositories** - unique repositories by canonical URL
 * **analysis_jobs** - job queue and status tracking
 * **drip_list_items** - final Drip List recommendation with a `split_percentage` per `package_url` (resolved repo URL of external dependency)
+  * ⚠️ The scored dependencies stored in this table are limited to GitHub-hosted projects (see [above](#get-latest-results))
 * **analysis_metadata** - job statistics and metrics
 * **package_url_cache** - cached external dependecy → canonical repository URL mappings
 
@@ -269,8 +261,6 @@ alembic upgrade head
 alembic downgrade -1
 ```
 
-<br/>
-
 ## Troubleshooting
 * **401 on submit**: check for expired token (default `TOKEN_EXPIRY_SECONDS`: >300 seconds), HMAC_SHARED_SECRET mismatch between token and API, or `X-Repo-Url` header mismatch with token payload
 * **502 / trusted hosts**: ensure `--proxy-headers` and `ALLOWED_HOSTS` are correct
@@ -287,8 +277,6 @@ alembic downgrade -1
   docker-compose logs -f api
   docker-compose logs -f worker
   ```
-
-<br/>
 
 ## API client examples
 
@@ -348,7 +336,7 @@ import { makeGardenerToken } from "path/to/gardenerAuth";
   }
 ```
 
-To poll results:
+To poll job status:
 ```typescript
 async function pollJob(jobId: string, { interval = 3000, max = 60 } = {}) {
   for (let i = 0; i < max; i++) {

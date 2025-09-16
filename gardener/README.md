@@ -22,13 +22,9 @@ Type‑safe, deterministic static analysis that builds a multi-language dependen
     - [File resolution](#file-resolution)
     - [Examples handled](#examples-handled)
 
-<br/>
-
 ## Quick start
 
 See [README: Quick Start](../README.md#quick-start) for installation and basic usage.
-
-<br/>
 
 ## Analysis pipeline
 
@@ -69,8 +65,6 @@ See [README: Quick Start](../README.md#quick-start) for installation and basic u
 
 ![Keras import graph visualization](visualization/visualization-demo.gif)
 
-<br/>
-
 ## Architecture
 
 ```text
@@ -98,8 +92,6 @@ gardener/
 ├── persistence/                # Storage abstraction layer
 └── visualization/              # Graph visualization
 ```
-
-<br/>
 
 ## Language support
 
@@ -158,8 +150,6 @@ class NewLanguageHandler(LanguageHandler):
         pass
 ```
 
-<br/>
-
 ## Configuration
 
 Core defaults are specified in [`gardener/common/defaults.py`](common/defaults.py). Highlights:
@@ -174,8 +164,6 @@ These can be overriden at runtime via the CLI `-c` JSON, e.g.:
 python -m gardener.main_cli <repo> \
   --config '{"CENTRALITY_METRIC":"katz","EDGE_W_IMPORTS_PACKAGE":0.6}'
 ```
-
-<br/>
 
 ## Alias & framework resolution
 
