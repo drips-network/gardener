@@ -212,9 +212,8 @@ Create two services (API + Worker) pointing to this repository, add PostgreSQL a
   * `ALLOWED_HOSTS` (your Railway domain or `*.up.railway.app,*.railway.app`)
   * `DATABASE_URL` = Postgres (Railway reference)
   * `REDIS_URL` = Redis (Railway reference)
-  * `RUN_DB_MIGRATIONS=0` (recommended)
-    Run a one‑time migration via temporary Start Command:
-    `bash -lc 'cd services && /opt/venv/bin/alembic upgrade head && uvicorn services.api.app.main:app --host 0.0.0.0 --port ${PORT:-8080} --proxy-headers'` , and then revert to the normal Start command
+  * `RUN_DB_MIGRATIONS=1` (default, migrations run automatically during deployment startup)
+    * Set `RUN_DB_MIGRATIONS=0` only if you prefer to manage Alembic migrations manually
 
 **Worker**
 

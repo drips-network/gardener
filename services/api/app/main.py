@@ -3,6 +3,7 @@ Main FastAPI application
 """
 
 import os
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -80,8 +81,61 @@ async def lifespan(app: FastAPI):
             logger.info("Applying database migrations...")
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
             services_dir = os.path.join(project_root, "services")
-            secure_proc = SecureSubprocess(allowed_root=project_root, timeout=60)
-            secure_proc.run(["alembic", "upgrade", "head"], cwd=services_dir, check=True)
+
+            python_executable = sys.executable or ""
+            python_bin_dirs = []
+            if python_executable:
+                try:
+                    python_dir = os.path.dirname(os.path.abspath(python_executable))
+                    if os.path.isdir(python_dir):
+                        python_bin_dirs.append(python_dir)
+                except Exception:
+                    python_bin_dirs = []
+            else:
+                python_executable = "python3"
+
+            migration_env_keys = [
+                "DATABASE_URL",
+                "PGHOST",
+                "PGPORT",
+                "PGUSER",
+                "PGPASSWORD",
+                "PGDATABASE",
+                "PGSSLMODE",
+                "ENVIRONMENT",
+                "DEBUG",
+                "PYTHONPATH",
+                "HMAC_SHARED_SECRET",
+                "HMAC_HASH_NAME",
+                "TOKEN_EXPIRY_SECONDS",
+            ]
+            migration_env = {}
+            for key in migration_env_keys:
+                value = os.environ.get(key)
+                if isinstance(value, str) and value:
+                    migration_env[key] = value
+
+            if "DATABASE_URL" not in migration_env and settings.database.DATABASE_URL:
+                migration_env["DATABASE_URL"] = str(settings.database.DATABASE_URL)
+
+            pythonpath_entries = []
+            existing_pythonpath = migration_env.get("PYTHONPATH")
+            if existing_pythonpath:
+                pythonpath_entries.extend(
+                    entry for entry in existing_pythonpath.split(os.pathsep) if entry
+                )
+            if project_root not in pythonpath_entries:
+                pythonpath_entries.append(project_root)
+            migration_env["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
+
+            secure_proc = SecureSubprocess(
+                allowed_root=project_root,
+                timeout=60,
+                allowed_env_vars=migration_env_keys,
+                extra_path_dirs=python_bin_dirs,
+            )
+            secure_proc.run([python_executable, "-m", "alembic", "upgrade", "head"],
+                            cwd=services_dir, env=migration_env, check=True)
             logger.info("Database migrations applied")
     except Exception as e:
         logger.error(f"Failed to apply migrations on startup: {e}")
