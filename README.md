@@ -47,6 +47,9 @@ make js-helpers
 
 # Analyze local repository
 python -m gardener.main_cli /path/to/repo
+
+# Or a GitHub-, GitLab-, or Bitbucket-hosted repository
+python -m gardener.main_cli https://github.com/owner/repo
 ````
 
 **Options**:
