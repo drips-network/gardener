@@ -246,6 +246,10 @@ Create two services (API + Worker) pointing to this repository, add PostgreSQL a
 * **analysis_metadata** - job statistics and metrics
 * **package_url_cache** - cached external dependecy → canonical repository URL mappings
 
+Notes on URL columns:
+* `package_url_cache.resolved_url` and `drip_list_items.package_url` store the "https://"-prefixed, originally-cased URL that is returned by [Gardener's URL resolver](gardener/package_metadata/url_resolver.py) for analyzed projects' external dependencies
+* `drip_list_items.repository_url` and `repositories.canonical_url` store lower-cased URLs without a "https://" prefix
+
 ### Migrations
 
 ```bash
