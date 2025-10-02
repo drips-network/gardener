@@ -159,9 +159,12 @@ GET /api/v1/analyses/{job_id}
   "repository_id": "uuid",
   "status": "COMPLETED",
   "created_at": "2024-01-01T00:00:00Z",
+  "started_at": "2024-01-01T00:00:10Z",
   "completed_at": "2024-01-01T00:05:00Z",
   "commit_sha": "abc123",
-  "error_message": null
+  "error_message": null,
+  "predicted_duration_seconds": 42.123,
+  "elapsed_seconds": 299.876
 }
 ```
 
@@ -244,7 +247,7 @@ Create two services (API + Worker) pointing to this repository, add PostgreSQL a
 * **Rate limiting**: Redis-backed rate limiting is configurable via `RATE_LIMIT_PER_MINUTE` (default: `60`)
 * **Security**: use HTTPS and set `ALLOWED_HOSTS` to your domain(s). Keep `DEBUG=false` in production
 * **URL caching**: external dependencies' repository URLs are cached in `package_url_cache`; when a job is submitted with the `--force_url_refresh` flag, cached repo URLs will get overwritten by newly fetched matches
-* **Runtime prediction**: when configured (see below), POST `/api/v1/analyses/run` returns `predicted_duration_seconds`, and GET `/api/v1/analyses/{job_id}` returns both `predicted_duration_seconds` and a live `elapsed_seconds` (frozen at completion). (Intended for use cases like client-side progress approximation via something like `min(0.98, elapsed_seconds / predicted_duration_seconds)` until status becomes `COMPLETED`.)
+* **Runtime prediction**: when configured (see below), POST `/api/v1/analyses/run` returns `predicted_duration_seconds`, and GET `/api/v1/analyses/{job_id}` returns both `predicted_duration_seconds` and a live `elapsed_seconds` (frozen at completion). `elapsed_seconds` is null until the worker sets `started_at` (i.e., until the job begins cloning the to-be-analyzed repository). (Intended for use cases like client-side progress approximation via something like `min(0.98, elapsed_seconds / predicted_duration_seconds)` until status becomes `COMPLETED`.)
 * **Versioning**: the API reads its version from the installed `gardener` package. Publishing a new package or shipping a new image updates the version endpoint automatically
 
 ## Runtime prediction

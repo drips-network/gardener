@@ -424,13 +424,15 @@ async def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
     except Exception as e:
         logger.warning(f"Failed to apply stale status on job {job_id}: {e}")
 
-    # Compute elapsed runtime seconds
+    # Compute elapsed runtime seconds from job start and freeze at completion
+    # so elapsed doesn't continune to accumulate after DONE
     elapsed = None
     try:
-        if job.created_at:
+        start_ts = job.started_at
+        if start_ts:
             end_ts = job.completed_at or datetime.now(timezone.utc)
-            seconds = (end_ts - job.created_at).total_seconds()
-            elapsed = Decimal(seconds)
+            seconds = (end_ts - start_ts).total_seconds()
+            elapsed = Decimal(seconds if seconds > 0 else 0)
     except Exception:
         elapsed = None
 
@@ -439,6 +441,7 @@ async def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
         repository_id=job.repository_id,
         status=job.status,
         created_at=job.created_at,
+        started_at=job.started_at,
         completed_at=job.completed_at,
         error_message=job.error_message,
         commit_sha=job.commit_sha if job.commit_sha != "pending" else None,

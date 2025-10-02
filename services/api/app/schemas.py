@@ -81,6 +81,7 @@ class JobStatusResponse(BaseModel):
     repository_id: UUID
     status: JobStatus
     created_at: datetime
+    started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
     commit_sha: Optional[str] = None
