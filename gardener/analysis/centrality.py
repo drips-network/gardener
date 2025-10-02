@@ -104,13 +104,8 @@ class CentralityCalculator:
             Dictionary mapping node IDs to Katz centrality scores
         """
         # Initial centrality values (beta)
+        # Use a uniform exogenous influence of 1.0 for all nodes
         beta = {n: 1.0 for n in graph.nodes()}
-
-        # Add extra weight to object nodes if available
-        if hasattr(self, "object_nodes"):
-            for node_id in self.object_nodes:
-                if node_id in beta:
-                    beta[node_id] = cfg.KATZ_BETA_OBJECT
 
         # Calculate Katz centrality
         weight_attr = "weight" if use_weights else None
