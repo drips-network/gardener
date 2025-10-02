@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     libpq-dev \
     postgresql-client \
+    git \
     curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -35,9 +36,9 @@ COPY pyproject.toml README.md /app/
 COPY gardener /app/gardener
 # Optionally use pinned requirements for reproducible builds if present
 RUN if [ -f /app/services/requirements.txt ]; then \
-        uv pip install -r /app/services/requirements.txt ; \
+        uv pip install --system -r /app/services/requirements.txt ; \
     else \
-        uv pip install -e '.[service]' ; \
+        uv pip install --system -e ".[service]" ; \
     fi
 
 # (services already copied above)

@@ -32,7 +32,7 @@ See [README: Quick Start](../README.md#quick-start) for installation and basic u
    - Identifies source files and manifests
    - Respects `.gitignore` patterns
    - Detects language from file extensions
-   - Parses `.gitmodules`: if a repo's dependency is vendored via git submodule, Gardener prioritizes the submodule’s canonical URL from `.gitmodules`.
+   - Parses `.gitmodules`: if a repo's dependency is vendored via git submodule, Gardener prioritizes the submodule's canonical URL from `.gitmodules`.
 1. **Manifest processing** (package.json, requirements.txt / pyproject, Cargo.toml, go.mod, foundry.toml, remappings.txt, Hardhat configs)
    - Extracts declared dependencies
    - Maps distribution names to import names (e.g., `python-telegram-bot` → `telegram`)

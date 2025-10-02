@@ -16,6 +16,9 @@ REST API and background worker architecture for running Gardener's **[core depen
     - [Get latest results](#get-latest-results)
   - [Deployment example (Railway, Nixpacks)](#deployment-example-railway-nixpacks)
   - [Operational notes](#operational-notes)
+  - [Runtime prediction](#runtime-prediction)
+    - [Config](#config)
+    - [Fitting the model](#fitting-the-model)
   - [Database schema](#database-schema)
     - [Core tables](#core-tables)
     - [Migrations](#migrations)
@@ -214,6 +217,11 @@ Create two services (API + Worker) pointing to this repository, add PostgreSQL a
   * `REDIS_URL` = Redis (Railway reference)
   * `RUN_DB_MIGRATIONS=1` (default, migrations run automatically during deployment startup)
     * Set `RUN_DB_MIGRATIONS=0` only if you prefer to manage Alembic migrations manually
+  * Optional (runtime prediction): set both on API for enqueue-time predictions
+    * `DURATION_MODEL_JSON` — one-line JSON with model params (see Runtime prediction below)
+    * `GITHUB_TOKEN` — GitHub PAT to enable `/languages` and root `/contents` calls
+  * Versioning: No manual bumps; `/version` returns the installed package
+    version (from package metadata). If you need to override, set `SERVICE_VERSION`
 
 **Worker**
 
@@ -226,6 +234,8 @@ Create two services (API + Worker) pointing to this repository, add PostgreSQL a
   `DATABASE_URL`, `REDIS_URL`,
   `ALLOWED_HOSTS` (any non-"\*"),
   `NIXPACKS_PKGS=git nodejs_20` (`git` is required for cloning; `nodejs_20` is needed if you build the Hardhat TS remappings helper)
+  Optional (runtime prediction fallback):
+  `DURATION_MODEL_JSON`, `GITHUB_TOKEN` — only needed if you want the worker to backfill predictions when API couldn't
 
 ## Operational notes
 
@@ -234,6 +244,36 @@ Create two services (API + Worker) pointing to this repository, add PostgreSQL a
 * **Rate limiting**: Redis-backed rate limiting is configurable via `RATE_LIMIT_PER_MINUTE` (default: `60`)
 * **Security**: use HTTPS and set `ALLOWED_HOSTS` to your domain(s). Keep `DEBUG=false` in production
 * **URL caching**: external dependencies' repository URLs are cached in `package_url_cache`; when a job is submitted with the `--force_url_refresh` flag, cached repo URLs will get overwritten by newly fetched matches
+* **Runtime prediction**: when configured (see below), POST `/api/v1/analyses/run` returns `predicted_duration_seconds`, and GET `/api/v1/analyses/{job_id}` returns both `predicted_duration_seconds` and a live `elapsed_seconds` (frozen at completion). (Intended for use cases like client-side progress approximation via something like `min(0.98, elapsed_seconds / predicted_duration_seconds)` until status becomes `COMPLETED`.)
+* **Versioning**: the API reads its version from the installed `gardener` package. Publishing a new package or shipping a new image updates the version endpoint automatically
+
+## Runtime prediction
+
+Gardener can estimate how long an analysis will run. This feature is optional and controlled purely via environment variables (no runtime ML dependencies).
+
+### Config
+
+Set these on the API (required for enqueue-time predictions) and optionally on the Worker (fallback if API couldn't compute):
+
+- `DURATION_MODEL_JSON` — a one-line JSON blob describing a log-linear model
+- `GITHUB_TOKEN` — a GitHub Personal Access Token used for `/repos/{owner}/{repo}/languages` and root `/contents`
+
+Example (compact JSON):
+
+```bash
+python services/scripts/fit_duration_model.py \
+  --csv runtimes_per_repo.csv \
+  --out duration_model.json \
+  --version duration-v1
+
+# Compact for env variable
+export DURATION_MODEL_JSON="$(jq -c . duration_model.json)"
+export GITHUB_TOKEN="..."
+```
+
+### Fitting the model
+
+Use `services/scripts/fit_duration_model.py` to fit a parsimonious OLS model using some empirical dataset of Gardener analysis job runtimes, and emit a JSON file. Replace the deployment's `DURATION_MODEL_JSON` to update predictions without rebuilding images or redeploying code.
 
 ## Database schema
 

@@ -4,6 +4,7 @@ Main FastAPI application
 
 import os
 import sys
+from decimal import Decimal
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -20,7 +21,6 @@ from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session, joinedload
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse as StarletteJSONResponse
-
 from gardener.common.subprocess import SecureSubprocess
 from gardener.common.utils import get_logger
 from services.api.app.schemas import (
@@ -39,6 +39,7 @@ from services.shared.config import settings
 from services.shared.database import check_db_connection, get_db
 from services.shared.models import AnalysisJob, JobStatus, Repository
 from services.shared.utils import canonicalize_repo_url
+from services.shared.estimator import estimate_duration_seconds
 
 try:
     from importlib.metadata import version as _pkg_version  # Python 3.9+
@@ -74,6 +75,15 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI):
     """FastAPI lifespan context handling startup/shutdown without on_event"""
     logger.info("Starting Gardener API service...")
+    try:
+        logger.info(
+            "Service version: %s | env=%s | commit=%s",
+            settings.SERVICE_VERSION,
+            settings.ENVIRONMENT,
+            os.environ.get("GARDENER_GIT_COMMIT", "unknown"),
+        )
+    except Exception:
+        pass
 
     # Optional DB migrations
     try:
@@ -246,16 +256,10 @@ async def health_check():
 @app.get("/version", response_model=VersionResponse, tags=["Health"])
 async def version_info():
     """Get API version information"""
-    gardener_pkg_version = "0.1.0"
-    try:
-        if _pkg_version:
-            gardener_pkg_version = _pkg_version("gardener")
-    except Exception:
-        # Keep default if package metadata not available
-        pass
-
     return VersionResponse(
-        api_version=settings.SERVICE_VERSION, gardener_version=gardener_pkg_version, environment=settings.ENVIRONMENT
+        api_version=settings.SERVICE_VERSION,
+gardener_version=settings.SERVICE_VERSION,
+        environment=settings.ENVIRONMENT,
     )
 
 
@@ -366,8 +370,23 @@ async def run_analysis(analysis_request: AnalysisRunRequest, request: Request, d
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to queue analysis job"
             )
 
+        # Attempt job runtime prediction
+        predicted = None
+        try:
+            predicted = estimate_duration_seconds(analysis_request.repo_url)
+            if predicted is not None:
+                job.predicted_duration_seconds = predicted
+                db.commit()
+                db.refresh(job)
+        except Exception:
+            logger.warning("Prediction failed; continuing without predicted_duration_seconds")
+
         return AnalysisRunResponse(
-            job_id=job.id, repository_id=repository.id, status=job.status, message="Analysis queued successfully"
+            job_id=job.id,
+            repository_id=repository.id,
+            status=job.status,
+            message="Analysis queued successfully",
+            predicted_duration_seconds=job.predicted_duration_seconds,
         )
 
     except Exception as e:
@@ -405,6 +424,16 @@ async def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
     except Exception as e:
         logger.warning(f"Failed to apply stale status on job {job_id}: {e}")
 
+    # Compute elapsed runtime seconds
+    elapsed = None
+    try:
+        if job.created_at:
+            end_ts = job.completed_at or datetime.now(timezone.utc)
+            seconds = (end_ts - job.created_at).total_seconds()
+            elapsed = Decimal(seconds)
+    except Exception:
+        elapsed = None
+
     return JobStatusResponse(
         job_id=job.id,
         repository_id=job.repository_id,
@@ -413,6 +442,8 @@ async def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
         completed_at=job.completed_at,
         error_message=job.error_message,
         commit_sha=job.commit_sha if job.commit_sha != "pending" else None,
+        predicted_duration_seconds=job.predicted_duration_seconds,
+        elapsed_seconds=elapsed,
     )
 
 

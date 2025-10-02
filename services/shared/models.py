@@ -77,6 +77,8 @@ class AnalysisJob(Base):
     commit_sha = Column(String(64), nullable=False)
     status = Column(Enum(JobStatus), nullable=False, default=JobStatus.PENDING)
     graph_data_gz = Column(LargeBinary, nullable=True)  # Phase 1: Compressed graph artifact
+    # Optional runtime prediction for client progress bars
+    predicted_duration_seconds = Column(Numeric(10, 3), nullable=True)
     error_message = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     started_at = Column(TIMESTAMP(timezone=True), nullable=True)
@@ -94,6 +96,7 @@ class AnalysisJob(Base):
     __table_args__ = (
         Index("idx_analysis_jobs_status", "status"),
         Index("idx_analysis_jobs_repo_created", "repository_id", "created_at"),
+        Index("idx_analysis_jobs_predicted", "predicted_duration_seconds"),
     )
 
 

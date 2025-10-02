@@ -12,6 +12,15 @@ logger = get_logger("worker", verbose=settings.DEBUG)
 
 # Create Celery app
 app = Celery("gardener-worker")
+try:
+    logger.info(
+        "Worker boot | version=%s | env=%s | commit=%s",
+        settings.SERVICE_VERSION,
+        settings.ENVIRONMENT,
+        os.environ.get("GARDENER_GIT_COMMIT", "unknown"),
+    )
+except Exception:
+    pass
 
 # Configure Celery
 app.conf.update(

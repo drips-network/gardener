@@ -48,6 +48,9 @@ services:
       - REDIS_URL=redis://redis:6379/0
       # Require explicit HMAC secret; no default in compose
       - HMAC_SHARED_SECRET=${HMAC_SHARED_SECRET?HMAC_SHARED_SECRET is required}
+      # Optional estimator inputs; leave empty if not using predictions
+      - DURATION_MODEL_JSON=${DURATION_MODEL_JSON:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - DEBUG=${DEBUG:-true}
     ports:
@@ -84,6 +87,9 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-gardener}:${POSTGRES_PASSWORD?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-gardener_db}
       - REDIS_URL=redis://redis:6379/0
       - HMAC_SHARED_SECRET=${HMAC_SHARED_SECRET?HMAC_SHARED_SECRET is required}
+      # Optional estimator inputs; worker uses them only as a fallback fill
+      - DURATION_MODEL_JSON=${DURATION_MODEL_JSON:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - DEBUG=${DEBUG:-true}
     networks:

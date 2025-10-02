@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gardener"
-version = "0.1.0"
+version = "0.1.1"
 description = "Automated static analysis and dependency graph centrality analysis for recommendation of OSS dependency funding splits to be distributed via the Drips Network"
 requires-python = ">=3.9,<3.13"
 authors = [
@@ -62,6 +62,7 @@ dev = [
   "mypy>=1.7.0",
   "black>=24.3.0",
   "isort>=5.12.0",
+  "pandas>=2,<3",
 ]
 
 [project.scripts]

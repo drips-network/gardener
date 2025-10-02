@@ -173,7 +173,8 @@ class Settings(BaseSettings):
     # Service identification
     SERVICE_NAME: str = "gardener-service"
     # Default; will be overridden in __init__ if package metadata is present
-    SERVICE_VERSION: str = "0.1.0"
+    # Auto-derived from installed package metadata when available; see __init__
+    SERVICE_VERSION: str = "0.0.0"
 
     # Sub-configurations
     worker: WorkerConfig = WorkerConfig()
@@ -197,13 +198,16 @@ class Settings(BaseSettings):
         """
         super().__init__(**kwargs)
         self.database.DATABASE_URL = _build_database_url(self.database)
-        # Try to derive version from installed package metadata; fail gracefully
+        # Derive version from installed package metadata when possible
+        # Fallback to env SERVICE_VERSION (if provided), else keep default
+        derived = None
         try:
             if _pkg_version:
-                self.SERVICE_VERSION = _pkg_version("gardener")
+                derived = _pkg_version("gardener")
         except PackageNotFoundError:
-            # Keep default '0.0.0' if not installed as a package
-            pass
+            derived = None
+        env_override = os.getenv("SERVICE_VERSION")
+        self.SERVICE_VERSION = derived or env_override or self.SERVICE_VERSION
         # Apply basic production guardrails
         self._validate_production_safety()
 

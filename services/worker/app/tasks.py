@@ -23,6 +23,7 @@ from services.shared.models import AnalysisJob, JobStatus
 from services.shared.storage import storage_backend
 from services.shared.url_cache import UrlCacheService
 from services.worker.app.main import app
+from services.shared.estimator import estimate_duration_seconds
 
 logger = get_logger("worker.tasks")
 
@@ -257,6 +258,15 @@ def analyze_repo_task(job_id, drip_list_max_length=200, force_url_refresh=False)
             # Update status to RUNNING and set started_at
             job.status = JobStatus.RUNNING
             job.started_at = datetime.now(timezone.utc)
+            # Optional: backfill predicted duration if API couldn't set it
+            try:
+                if job.predicted_duration_seconds is None and job.repository and job.repository.url:
+                    pred = estimate_duration_seconds(job.repository.url)
+                    if pred is not None:
+                        job.predicted_duration_seconds = pred
+            except Exception:
+                # Proceed without prediction on any failure
+                pass
             db.commit()
 
             repo_url = job.repository.url

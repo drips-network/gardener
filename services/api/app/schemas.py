@@ -65,6 +65,13 @@ class AnalysisRunResponse(BaseModel):
     repository_id: UUID = Field(..., description="Unique identifier for the repository")
     status: JobStatus = Field(..., description="Current status of the job")
     message: str = Field(..., description="Human-readable status message")
+    predicted_duration_seconds: Optional[Decimal] = Field(
+        None, description="Predicted total processing time in seconds"
+    )
+
+    @field_serializer("predicted_duration_seconds")
+    def _ser_predicted(self, v):
+        return float(v) if v is not None else None
 
 
 class JobStatusResponse(BaseModel):
@@ -77,6 +84,12 @@ class JobStatusResponse(BaseModel):
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
     commit_sha: Optional[str] = None
+    predicted_duration_seconds: Optional[Decimal] = None
+    elapsed_seconds: Optional[Decimal] = None
+
+    @field_serializer("predicted_duration_seconds", "elapsed_seconds")
+    def _ser_decimals(self, v):
+        return float(v) if v is not None else None
 
 
 class DripListItemResponse(BaseModel):
