@@ -145,10 +145,15 @@ def _build_features_from_github(repo_url):
     total_lang_bytes = sum(int(v) for v in langs.values())
     supported_bytes = sum(int(langs.get(k, 0)) for k in SUPPORTED_LANGS)
 
-    # Shares (guard div by zero)
-    js_share = (langs.get("JavaScript", 0) / total_lang_bytes) if total_lang_bytes else 0.0
-    ts_share = (langs.get("TypeScript", 0) / total_lang_bytes) if total_lang_bytes else 0.0
-    py_share = (langs.get("Python", 0) / total_lang_bytes) if total_lang_bytes else 0.0
+    def share_for(lang_name):
+        return (langs.get(lang_name, 0) / total_lang_bytes) if total_lang_bytes else 0.0
+
+    js_share = share_for("JavaScript")
+    ts_share = share_for("TypeScript")
+    py_share = share_for("Python")
+    go_share = share_for("Go")
+    rust_share = share_for("Rust")
+    solidity_share = share_for("Solidity")
 
     # Root manifest sizes
     name_to_size = {}
@@ -169,6 +174,9 @@ def _build_features_from_github(repo_url):
         "lang_share__JavaScript": js_share,
         "lang_share__TypeScript": ts_share,
         "lang_share__Python": py_share,
+        "lang_share__Go": go_share,
+        "lang_share__Rust": rust_share,
+        "lang_share__Solidity": solidity_share,
     }
 
 

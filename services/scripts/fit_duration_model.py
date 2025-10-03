@@ -9,6 +9,9 @@ Features used:
 - lang_share__JavaScript
 - lang_share__TypeScript
 - lang_share__Python
+- lang_share__Rust
+- lang_share__Go
+- lang_share__Solidity
 """
 
 import argparse
@@ -25,6 +28,9 @@ FEATURES = [
     "lang_share__JavaScript",
     "lang_share__TypeScript",
     "lang_share__Python",
+    "lang_share__Rust",
+    "lang_share__Go",
+    "lang_share__Solidity",
 ]
 
 

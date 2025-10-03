@@ -18,7 +18,6 @@ REST API and background worker architecture for running Gardener's **[core depen
   - [Operational notes](#operational-notes)
   - [Runtime prediction](#runtime-prediction)
     - [Config](#config)
-    - [Fitting the model](#fitting-the-model)
   - [Database schema](#database-schema)
     - [Core tables](#core-tables)
     - [Migrations](#migrations)
@@ -256,12 +255,14 @@ Gardener can estimate how long an analysis will run. This feature is optional an
 
 ### Config
 
-Set these on the API (required for enqueue-time predictions) and optionally on the Worker (fallback if API couldn't compute):
+Set these on the API (required for enqueue-time predictions) and optionally on the Worker (fallback if API is unable to compute):
 
+- `GITHUB_TOKEN` — a Personal Access Token to be used for the GithHub API's `/repos/{owner}/{repo}/languages` and `/repos/{owner}/{repo}/contents` endpoints
 - `DURATION_MODEL_JSON` — a one-line JSON blob describing a log-linear model
-- `GITHUB_TOKEN` — a GitHub Personal Access Token used for `/repos/{owner}/{repo}/languages` and root `/contents`
 
-Example (compact JSON):
+Use `services/scripts/fit_duration_model.py` to fit a parsimonious OLS model using some empirical dataset of Gardener analysis job runtimes, and emit a JSON file. Replace the `DURATION_MODEL_JSON` environment variable (e.g. after further tuning) to update predictions.
+
+Example:
 
 ```bash
 python services/scripts/fit_duration_model.py \
@@ -269,14 +270,10 @@ python services/scripts/fit_duration_model.py \
   --out duration_model.json \
   --version duration-v1
 
-# Compact for env variable
+# Ensure to compact the json for DURATION_MODEL_JSON
 export DURATION_MODEL_JSON="$(jq -c . duration_model.json)"
 export GITHUB_TOKEN="..."
 ```
-
-### Fitting the model
-
-Use `services/scripts/fit_duration_model.py` to fit a parsimonious OLS model using some empirical dataset of Gardener analysis job runtimes, and emit a JSON file. Replace the deployment's `DURATION_MODEL_JSON` to update predictions without rebuilding images or redeploying code.
 
 ## Database schema
 
