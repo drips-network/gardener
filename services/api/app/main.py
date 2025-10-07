@@ -258,7 +258,7 @@ async def version_info():
     """Get API version information"""
     return VersionResponse(
         api_version=settings.SERVICE_VERSION,
-gardener_version=settings.SERVICE_VERSION,
+        gardener_version=settings.SERVICE_VERSION,
         environment=settings.ENVIRONMENT,
     )
 

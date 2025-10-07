@@ -1,4 +1,4 @@
-FROM python:3.9.21-slim
+FROM python:3.11-slim
 
 # System deps for common packages and tooling
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \

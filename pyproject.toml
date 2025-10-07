@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "gardener"
 version = "0.1.2"
 description = "Automated static analysis and dependency graph centrality analysis for recommendation of OSS dependency funding splits to be distributed via the Drips Network"
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.11,<3.13"
 authors = [
   { name = "Warren Winter" }
 ]
@@ -24,7 +24,7 @@ dependencies = [
   "numpy==1.26.4",
   "scipy==1.11.4",
   "toml",
-  "tomli; python_version < '3.11'",
+
   "tqdm",
   "tenacity",
 ]
@@ -80,7 +80,7 @@ exclude = [
 
 [tool.black]
 line-length = 120
-target-version = ["py39"]
+target-version = ["py311"]
 
 [tool.isort]
 profile = "black"
@@ -89,7 +89,7 @@ force_single_line = false
 combine_as_imports = true
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.11"
 warn_unused_configs = true
 ignore_missing_imports = true
 no_site_packages = true

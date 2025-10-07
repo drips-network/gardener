@@ -11,14 +11,7 @@ from gardener.common.secure_file_ops import FileOperationError
 from gardener.common.utils import Logger
 from gardener.treewalk.base import LanguageHandler, TreeVisitor
 
-# Prefer stdlib tomllib, fall back to tomli if available
-try:
-    import tomllib as _toml
-except Exception:  # pragma: no cover - environment dependent
-    try:
-        import tomli as _toml
-    except Exception:  # pragma: no cover - environment dependent
-        _toml = None
+import tomllib as _toml
 
 # Module-level logger instance
 logger = Logger(verbose=False)  # Will be configured by the caller

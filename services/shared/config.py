@@ -7,18 +7,7 @@ from typing import Optional
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
-# Python 3.9+ stdlib import with a consistent alias to avoid mypy redefinition issues
-try:  # Python 3.9+ stdlib
-    from importlib.metadata import PackageNotFoundError as _PkgNotFound, version as _pkg_version
-except Exception:  # pragma: no cover - very old envs
-    _pkg_version = None
-
-    class _PkgNotFound(Exception):
-        pass
-
-
-# Public alias used in the code below
-PackageNotFoundError = _PkgNotFound
+from importlib.metadata import PackageNotFoundError as PackageNotFoundError, version as _pkg_version
 
 
 class WorkerConfig(BaseSettings):
