@@ -29,25 +29,33 @@ REST API and background worker architecture for running Gardener's **[core depen
 
 ```text
 services/
-├── api/                  # FastAPI REST server
+├── api/                        # FastAPI REST server
 │   ├── app/
-│   │   ├── main.py       # API endpoints and middleware
-│   │   ├── schemas.py    # Request/response models
-│   │   └── security.py   # HMAC authentication
+│   │   ├── main.py             # API endpoints and middleware
+│   │   ├── schemas.py          # Request/response models
+│   │   └── security.py         # HMAC authentication
 │   └── Dockerfile
-├── worker/               # Celery background workers
+├── worker/                     # Celery background workers
 │   ├── app/
-│   │   ├── main.py       # Worker configuration
-│   │   └── tasks.py      # Analysis task implementation
+│   │   ├── main.py             # Worker configuration
+│   │   └── tasks.py            # Analysis task implementation
 │   └── Dockerfile
-├── shared/
-│   ├── models.py         # Database models
-│   ├── config.py         # Configuration management
-│   ├── storage.py        # Storage backends
+├── shared/                     # Microservice shared utilities
+│   ├── models.py               # Database models
+│   ├── database.py             # DB engine/session helpers
+│   ├── config.py               # Configuration management
+│   ├── storage.py              # Storage backends
+│   ├── compression.py          # Graph compression/decompression
+│   ├── url_cache.py            # Package URL cache helpers
+│   ├── drip_list_processor.py  # Drip List aggregation + normalization
+│   ├── estimator.py            # Job runtime prediction
+│   ├── celery_client.py        # Celery app factory/client
+│   ├── utils.py                # URL normalization and helpers
 │   └── persistence/
-│       └── alembic/      # Database migrations
+│       └── alembic/            # Database migrations
 └── scripts/
-    └── gen_token.py      # HMAC token generation helper script
+    ├── gen_token.py            # HMAC token generation helper
+    └── fit_duration_model.py   # Fit model for job runtime prediction
 ```
 
 ### Components
@@ -85,7 +93,7 @@ curl -X POST "http://localhost:8000/api/v1/analyses/run" \
   -H "Content-Type: application/json" \
   -d "{\"repo_url\": \"$REPO_URL\"}"
 ```
-* Only the job submission endpoint (**POST `/api/v1/analyses/run`**) requires authenticaiton.
+* Only the job submission endpoint (**POST `/api/v1/analyses/run`**) requires authentication
 * The token is valid for 5 minutes by default; this can be configured via `TOKEN_EXPIRY_SECONDS` in `services/shared/config.py
 * As an alternative to (5), you can execute the curl command printed by running:
 ```bash
@@ -257,7 +265,7 @@ Gardener can estimate how long an analysis will run. This feature is optional an
 
 Set these on the API (required for enqueue-time predictions) and optionally on the Worker (fallback if API is unable to compute):
 
-- `GITHUB_TOKEN` — a Personal Access Token to be used for the GithHub API's `/repos/{owner}/{repo}/languages` and `/repos/{owner}/{repo}/contents` endpoints
+- `GITHUB_TOKEN` — a Personal Access Token to be used for the GitHub API's `/repos/{owner}/{repo}/languages` and `/repos/{owner}/{repo}/contents` endpoints
 - `DURATION_MODEL_JSON` — a one-line JSON blob describing a log-linear model
 
 Use `services/scripts/fit_duration_model.py` to fit a parsimonious OLS model using some empirical dataset of Gardener analysis job runtimes, and emit a JSON file. Replace the `DURATION_MODEL_JSON` environment variable (e.g. after further tuning) to update predictions.
@@ -284,7 +292,7 @@ export GITHUB_TOKEN="..."
 * **drip_list_items** - final Drip List recommendation with a `split_percentage` per `package_url` (resolved repo URL of external dependency)
   * ⚠️ The scored dependencies stored in this table are limited to GitHub-hosted projects (see [above](#get-latest-results))
 * **analysis_metadata** - job statistics and metrics
-* **package_url_cache** - cached external dependecy → canonical repository URL mappings
+* **package_url_cache** - cached external dependency → canonical repository URL mappings
 
 Notes on URL columns:
 * `package_url_cache.resolved_url` and `drip_list_items.package_url` store the "https://"-prefixed, originally-cased URL that is returned by [Gardener's URL resolver](gardener/package_metadata/url_resolver.py) for analyzed projects' external dependencies
