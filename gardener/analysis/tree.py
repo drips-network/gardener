@@ -18,8 +18,8 @@ JS_TS_SOURCE_EXTS = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]
 JSONLIKE_EXTS = [".json"]
 
 import pathspec
-from grep_ast import filename_to_lang
-from grep_ast.tsl import get_parser
+from gardener.common.language_detection import filename_to_lang
+from gardener.common.tsl import get_parser
 
 from gardener.common.alias_config import AliasConfiguration, UnifiedAliasResolver
 from gardener.common.defaults import ResourceLimits
@@ -381,10 +381,10 @@ class RepositoryAnalyzer:
                             self.ts_config_files.append(full_path)
 
                         if ext in all_extensions:
-                            language = filename_to_lang(full_path)  # Use grep-ast's detection
+                            language = filename_to_lang(full_path)
 
                             if language is None:
-                                # Map extensions to languages for cases grep-ast doesn't handle
+                                # Map extensions to languages for cases the detection wrapper doesn't handle
                                 ext_to_lang = {
                                     ".cjs": "javascript",
                                     ".mjs": "javascript",

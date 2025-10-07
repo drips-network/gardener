@@ -36,7 +36,7 @@ class TestTimeoutProtection:
 
     def test_parse_timeout_protection(self):
         """Test that parsing respects timeout limits"""
-        from grep_ast.tsl import get_parser
+        from gardener.common.tsl import get_parser
 
         # Generate a file with deeply nested structures
         content = "def func():\n"
@@ -85,7 +85,7 @@ class TestTimeoutProtection:
 
     def test_tree_depth_limit(self):
         """Test that tree traversal respects depth limits"""
-        from grep_ast.tsl import get_parser
+        from gardener.common.tsl import get_parser
 
         from gardener.treewalk.python import PythonImportVisitor
 

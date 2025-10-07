@@ -5,7 +5,7 @@ Graph building and PageRank calculation
 from collections import defaultdict
 
 import networkx as nx
-from grep_ast import filename_to_lang
+from gardener.common.language_detection import filename_to_lang
 
 from gardener.analysis.centrality import CentralityCalculator
 from gardener.common.defaults import GraphAnalysisConfig as cfg

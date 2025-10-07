@@ -69,12 +69,12 @@ See [README: Quick Start](../README.md#quick-start) for installation and basic u
 
 ```text
 gardener/
-├── analysis/                   # Core analysis orchestration
-│   ├── main.py                 # Analysis entry point and orchestrator
-│   ├── tree.py                 # Repository scanning and import resolution
-│   ├── graph.py                # Dependency graph construction
-│   └── centrality.py           # Centrality analysis (PageRank, Katz)
-├── treewalk/                   # Language-specific parsers
+├── analysis/                    # Core analysis orchestration
+│   ├── main.py                  # Analysis entry point and orchestrator
+│   ├── tree.py                  # Repository scanning and import resolution
+│   ├── graph.py                 # Dependency graph construction
+│   └── centrality.py            # Centrality analysis (PageRank, Katz)
+├── treewalk/                    # Language-specific parsers
 │   ├── python.py
 │   ├── javascript.py
 │   ├── typescript.py
@@ -82,15 +82,21 @@ gardener/
 │   ├── rust.py
 │   └── solidity.py
 ├── package_metadata/
-│   ├── url_resolver.py         # Repository URL resolution for external dependencies
-│   └── name_resolvers/         # Distribution name → import name mapping
-├── common/                     # Shared utilities
-│   ├── secure_file_ops.py      # Secure I/O and path traversal protection
-│   ├── subprocess.py           # Sandboxed command execution
-│   ├── alias_config.py         # Unified alias resolution
-│   └── framework_config.py     # Framework-specific aliases
-├── persistence/                # Storage abstraction layer
-└── visualization/              # Graph visualization
+│   ├── url_resolver.py          # Repository URL resolution for external dependencies
+│   └── name_resolvers/          # Distribution name → import name mapping
+├── common/                      # Shared utilities
+│   ├── alias_config.py          # Unified alias resolution
+│   ├── framework_config.py      # Framework-specific aliases
+│   ├── defaults.py              # Tunable analysis defaults
+│   ├── input_validation.py      # CLI and API input validation
+│   ├── file_helpers.py          # Shared file IO helpers
+│   ├── secure_file_ops.py       # Secure I/O and path traversal protection
+│   ├── subprocess.py            # Sandboxed command execution
+│   ├── utils.py                 # Logging and helpers
+│   ├── tsl.py                   # Tree-sitter wrapper
+│   └── language_detection.py    # Filename → language detection
+├── persistence/                 # Storage abstraction layer
+└── visualization/               # Graph visualization
 ```
 
 ## Language support

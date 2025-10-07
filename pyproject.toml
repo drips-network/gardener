@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gardener"
-version = "0.1.1"
+version = "0.1.2"
 description = "Automated static analysis and dependency graph centrality analysis for recommendation of OSS dependency funding splits to be distributed via the Drips Network"
 requires-python = ">=3.9,<3.13"
 authors = [
@@ -16,11 +16,12 @@ license-files = ["LICENSE"]
 dependencies = [
   "GitPython==3.1.44",
   "pathspec==0.12.1",
-  "grep-ast==0.8.1",
+  "tree-sitter==0.23.2",
+  "tree-sitter-language-pack==0.6.1",
   "networkx==3.2.1",
   "requests==2.32.3",
   "pydantic>=2,<3",
-  "numpy>=1.23,<2",
+  "numpy==1.26.4",
   "scipy==1.11.4",
   "toml",
   "tomli; python_version < '3.11'",
@@ -33,8 +34,6 @@ viz = [
   "ipysigma>=0.21",
 ]
 service = [
-  "tree-sitter==0.23.2",
-  "tree-sitter-language-pack==0.6.1",
   "fastapi==0.104.1",
   "uvicorn[standard]==0.24.0",
   "celery==5.3.4",

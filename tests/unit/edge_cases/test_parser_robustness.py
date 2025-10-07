@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from grep_ast.tsl import get_parser
+from gardener.common.tsl import get_parser
 
 from gardener.common.utils import Logger
 from gardener.treewalk.go import GoLanguageHandler

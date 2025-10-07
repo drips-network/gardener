@@ -10,7 +10,7 @@ import pytest
 # Expose additional fixtures from support library
 pytest_plugins = ["tests.support.fixtures"]
 
-from grep_ast.tsl import get_parser
+from gardener.common.tsl import get_parser
 
 from gardener.analysis.graph import DependencyGraphBuilder
 from gardener.common.utils import Logger
