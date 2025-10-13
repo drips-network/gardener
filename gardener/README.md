@@ -47,6 +47,7 @@ See [README: Quick Start](../README.md#quick-start) for installation and basic u
    - External package imports
    - Specific component imports
    - Local file-to-file dependencies
+   - Parsers are obtained via `gardener/common/tsl.py` which supports `tree_sitter_language_pack` or `tree_sitter_languages`
 4. **Graph construction** — a directed graph with:
    - **Nodes**: Files, packages, and package components
    - **Edges**: Import relationships with typed connections (to adjust scaling factors per edge type, see [Configuration](#configuration) below))
@@ -70,8 +71,13 @@ See [README: Quick Start](../README.md#quick-start) for installation and basic u
 ```text
 gardener/
 ├── analysis/                    # Core analysis orchestration
-│   ├── main.py                  # Analysis entry point and orchestrator
-│   ├── tree.py                  # Repository scanning and import resolution
+│   ├── main.py                  # Analysis entry point and high-level orchestrator
+│   ├── tree.py                  # RepositoryAnalyzer orchestrator (delegates to helpers)
+│   ├── scanner.py               # Secure repo scan, .gitignore, foundry src, .gitmodules
+│   ├── manifests.py             # Manifest processing, dedup, conflicts, import-name attach
+│   ├── js_ts_aliases.py         # tsconfig/jsconfig parsing and alias resolver creation
+│   ├── imports.py               # LocalImportResolver and import extraction loop
+│   ├── solidity_meta.py         # Solidity remappings and submodule association
 │   ├── graph.py                 # Dependency graph construction
 │   └── centrality.py            # Centrality analysis (PageRank, Katz)
 ├── treewalk/                    # Language-specific parsers
@@ -93,7 +99,7 @@ gardener/
 │   ├── secure_file_ops.py       # Secure I/O and path traversal protection
 │   ├── subprocess.py            # Sandboxed command execution
 │   ├── utils.py                 # Logging and helpers
-│   ├── tsl.py                   # Tree-sitter wrapper
+│   ├── tsl.py                   # Tree-sitter wrapper (selects language backend)
 │   └── language_detection.py    # Filename → language detection
 ├── persistence/                 # Storage abstraction layer
 └── visualization/               # Graph visualization
@@ -173,7 +179,7 @@ python -m gardener.main_cli <repo> \
 
 ## Alias & framework resolution
 
-Gardener has an alias configuration system that handles all types of commonly import aliases commonly used in JS/TS. Gardener resolves JS/TS and framework‑specific aliases before deciding whether an import is local or external.
+Gardener has an alias configuration system that handles commonly used JS/TS import aliases. The `LocalImportResolver` consults the unified resolver for both path and framework aliases and prefers its extension set when resolving relative imports, falling back to defaults only when no resolver is present. Gardener resolves JS/TS and framework‑specific aliases before deciding whether an import is local or external
 
 See:
 * Core config datatypes in [`gardener/common/alias_config.py`](common/alias_config.py)
