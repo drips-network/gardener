@@ -3,13 +3,26 @@ Storage backends for persisting analysis results
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from gardener.common.utils import get_logger
-from services.shared.compression import to_gzip_bytes
+from services.shared.artifacts import (
+    build_artifact_key,
+    make_graph_pickle_bytes,
+    make_results_json_bytes,
+)
+from services.shared.config import settings
 from services.shared.database import get_db_session
-from services.shared.models import AnalysisJob, AnalysisMetadata, DripListItem, PackageUrlCache
+from services.shared.models import (
+    AnalysisArtifact,
+    AnalysisJob,
+    AnalysisMetadata,
+    DripListItem,
+    PackageUrlCache,
+    ArtifactType,
+)
+from services.shared.object_storage import upload_bytes
 from services.shared.url_cache import UrlCacheService
 from services.shared.utils import normalize_drip_list
 
@@ -61,9 +74,9 @@ class PostgresStorageBackend(StorageBackend):
         Save analysis results to PostgreSQL database
 
         This performs a transactional save of:
-        1. Compressed complete analysis results to analysis_jobs.graph_data_gz
-        2. Individual Drip List items to drip_list_items table
-        3. Analysis metadata to analysis_metadata table
+        1. Individual Drip List items to drip_list_items table
+        2. Analysis metadata to analysis_metadata table
+        3. Serialized artifacts uploaded to object storage with metadata tracked in analysis_artifacts
         4. Package URL cache updates
         """
         logger.info(f"PostgresStorageBackend.save_analysis_results called for job {job_id}")
@@ -72,37 +85,48 @@ class PostgresStorageBackend(StorageBackend):
 
         with get_db_session() as db:
             try:
-                # Get the job record with repository relationship
                 job = db.query(AnalysisJob).filter_by(id=job_id).first()
                 if not job:
                     raise ValueError(f"Job {job_id} not found")
 
-                # Get repository URL for denormalization
+                metadata = metadata or {}
+                complete_analysis_results = complete_analysis_results or {}
+
                 repository = job.repository
                 canonical_url = repository.canonical_url
 
-                # Update commit SHA if needed
                 if job.commit_sha != commit_sha:
                     job.commit_sha = commit_sha
 
-                # Compress and save complete analysis results
-                analysis_compressed = to_gzip_bytes(complete_analysis_results)
-                job.graph_data_gz = analysis_compressed
-                logger.info(f"Compressed analysis results: {len(analysis_compressed)} bytes gzipped")
+                graph_node_link = complete_analysis_results.get("dependency_graph") or {}
+                graph_pickle_bytes = make_graph_pickle_bytes(graph_node_link)
+                results_json_bytes = make_results_json_bytes(complete_analysis_results)
 
-                # Normalize Drip List to filter out empty URLs, self-references, and ensure 100% total
+                bucket = settings.object_storage.BUCKET
+                graph_key = build_artifact_key(canonical_url, commit_sha, job_id, "graph.pkl")
+                results_key = build_artifact_key(canonical_url, commit_sha, job_id, "results.json")
+
+                graph_meta = upload_bytes(
+                    bucket=bucket,
+                    object_key=graph_key,
+                    data_bytes=graph_pickle_bytes,
+                    content_type="application/octet-stream",
+                    metadata={"artifact": "graph_pickle"},
+                )
+                results_meta = upload_bytes(
+                    bucket=bucket,
+                    object_key=results_key,
+                    data_bytes=results_json_bytes,
+                    content_type="application/json",
+                    metadata={"artifact": "results_json"},
+                )
+
                 normalized_drip_list = normalize_drip_list(
                     drip_list, max_length=drip_list_max_length, analyzed_repo_url=canonical_url
                 )
 
-                # Get the analysis completion timestamp
-                # Note: This is called after the analysis is done, so we use current time
-                # The job's completed_at will be set by the worker after this method returns
-                from datetime import timezone
-
                 analyzed_at = datetime.now(timezone.utc)
 
-                # Save normalized Drip List items
                 for item in normalized_drip_list:
                     drip_item = DripListItem(
                         job_id=job_id,
@@ -114,7 +138,6 @@ class PostgresStorageBackend(StorageBackend):
                     )
                     db.add(drip_item)
 
-                # Update package URL cache using original external package names
                 if external_packages:
                     logger.info(f"Updating cache for {len(external_packages)} external packages")
                     for original_name, pkg_data in external_packages.items():
@@ -132,18 +155,48 @@ class PostgresStorageBackend(StorageBackend):
 
                 logger.info(f"Saved {len(normalized_drip_list)} Drip List items (filtered from {len(drip_list)})")
 
-                # Save analysis metadata
+                graph_row = AnalysisArtifact(
+                    job_id=job_id,
+                    artifact_type=ArtifactType.GRAPH_PICKLE,
+                    bucket=bucket,
+                    object_key=graph_key,
+                    content_type="application/octet-stream",
+                    size_bytes=graph_meta["size_bytes"],
+                    etag=graph_meta["etag"],
+                    checksum_md5=graph_meta["checksum_md5"],
+                    checksum_sha256=graph_meta["checksum_sha256"],
+                    version_id=graph_meta["version_id"],
+                )
+                db.add(graph_row)
+
+                results_row = AnalysisArtifact(
+                    job_id=job_id,
+                    artifact_type=ArtifactType.RESULTS_JSON,
+                    bucket=bucket,
+                    object_key=results_key,
+                    content_type="application/json",
+                    size_bytes=results_meta["size_bytes"],
+                    etag=results_meta["etag"],
+                    checksum_md5=results_meta["checksum_md5"],
+                    checksum_sha256=results_meta["checksum_sha256"],
+                    version_id=results_meta["version_id"],
+                )
+                db.add(results_row)
+
+                logger.info(
+                    f"Uploaded artifacts for job {job_id}: graph={graph_key} ({graph_meta['size_bytes']}B), "
+                    f"results={results_key} ({results_meta['size_bytes']}B)"
+                )
+
                 analysis_meta = AnalysisMetadata(
                     job_id=job_id,
                     total_files=metadata.get("total_files", 0),
                     languages_detected=metadata.get("languages_detected", []),
                     analysis_duration_seconds=Decimal(str(metadata.get("analysis_duration_seconds", 0))),
-                    graph_size_bytes=len(analysis_compressed),
+                    graph_size_bytes=graph_meta["size_bytes"],
                 )
                 db.add(analysis_meta)
                 logger.info("Saved analysis metadata")
-
-                # Transaction will be committed by the context manager
                 logger.info(f"Successfully saved all analysis results for job {job_id}")
 
             except Exception as e:

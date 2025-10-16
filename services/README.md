@@ -9,6 +9,7 @@ REST API and background worker architecture for running Gardener's **[core depen
     - [Components](#components)
   - [Quick start](#quick-start)
     - [Local development with Docker Compose](#local-development-with-docker-compose)
+  - [Object storage](#object-storage)
   - [API endpoints](#api-endpoints)
     - [Health check](#health-check)
     - [Submit analysis](#submit-analysis)
@@ -61,7 +62,7 @@ services/
 ### Components
 * **API** (FastAPI): queues analysis jobs, exposes status and results
 * **Worker** (Celery): asynchronous processing of analysis jobs (involving cloning repos, analyzing source, package URL resolution, results storage)
-* **Storage** (PostgreSQL): of job metadata, compressed dependency graphs, analysis results, and cached package URLs
+* **Storage** (Postgres): of job metadata, compressed dependency graphs, analysis results, and cached package URLs
 * **Message broker** (Redis): for job queue and rate limiting
 
 ## Quick start
@@ -74,9 +75,15 @@ cp .env.example .env
 # Edit .env with required variables:
 # - POSTGRES_PASSWORD (required)
 # - HMAC_SHARED_SECRET (required, 32+ chars)
+# - S3_* variables (required): point to MinIO/S3-compatible object storage
+#   S3_ENDPOINT_URL, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET, S3_REGION,
+#   S3_FORCE_PATH_STYLE=true, S3_ARTIFACTS_PREFIX=gardener/v1
 
 # 2. Start services
 docker-compose up -d
+# If you added a local MinIO service to compose, create the bucket once
+#   mc alias set local "$S3_ENDPOINT_URL" "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY"
+#   mc mb local/"$S3_BUCKET"
 
 # 3. Check health, version
 curl http://localhost:8000/health
@@ -99,6 +106,32 @@ curl -X POST "http://localhost:8000/api/v1/analyses/run" \
 ```bash
 python services/scripts/gen_token.py --url "$REPO_URL" --print-curl
 ```
+
+## Object storage
+
+Gardener stores large artifacts in an S3-compatible object store (e.g., MinIO):
+
+- Artifacts per job
+  - `graph.pkl` — NetworkX pickle of the dependency graph
+  - `results.json` — lightweight analysis results
+- Object key layout
+  - `"{S3_ARTIFACTS_PREFIX}/{canonical_url}/{commit_sha}/{job_id}/{artifact}"`
+  - Example: `gardener/v1/github.com/owner/repo/abcd1234.../job-uuid/graph.pkl`
+- Checksums & metadata
+  - Size, ETag, MD5, SHA‑256, optional VersionId are captured
+- Postgres database pointer table
+  - `analysis_artifacts` links each job to its artifacts and metadata
+
+Environment variables (API and Worker):
+
+- `S3_ENDPOINT_URL` - e.g., `https://bucket-<id>.up.railway.app` for Railway MinIO
+- `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` - MinIO credentials
+- `S3_BUCKET` - pre-created bucket (e.g., `gardener-artifacts`)
+- `S3_REGION` - any string (e.g., `eu-west-3`)
+- `S3_FORCE_PATH_STYLE` - `true` for MinIO and most S3-compatible endpoints
+- `S3_ARTIFACTS_PREFIX` - `gardener/v1` by default
+
+Ensure to create the bucket once via `mc` or `aws`.
 
 ## API endpoints
 
@@ -213,7 +246,7 @@ GET /api/v1/repositories/results/latest?repository_url=github.com/owner/repo
 
 ## Deployment example (Railway, Nixpacks)
 
-Create two services (API + Worker) pointing to this repository, add PostgreSQL and Redis, and then:
+Create two services (API + Worker) pointing to this repository, add Postgres and Redis, and then:
 
 **API**
 
@@ -289,13 +322,15 @@ export GITHUB_TOKEN="..."
 
 * **repositories** - unique repositories by canonical URL
 * **analysis_jobs** - job queue and status tracking
+  * Removed legacy in-DB artifact blob; see migrations below
 * **drip_list_items** - final Drip List recommendation with a `split_percentage` per `package_url` (resolved repo URL of external dependency)
   * ⚠️ The scored dependencies stored in this table are limited to GitHub-hosted projects (see [above](#get-latest-results))
-* **analysis_metadata** - job statistics and metrics
+* **analysis_metadata** - job statistics and metrics (includes `graph_size_bytes`)
+* **analysis_artifacts** - metadata pointers for S3-stored artifacts (per job, unique on `(job_id, artifact_type)`)
 * **package_url_cache** - cached external dependency → canonical repository URL mappings
 
 Notes on URL columns:
-* `package_url_cache.resolved_url` and `drip_list_items.package_url` store the "https://"-prefixed, originally-cased URL that is returned by [Gardener's URL resolver](gardener/package_metadata/url_resolver.py) for analyzed projects' external dependencies
+* `package_url_cache.resolved_url` and `drip_list_items.package_url` store the "https://"-prefixed, originally-cased URL that is returned by [Gardener's URL resolver](../gardener/package_metadata/url_resolver.py) for analyzed projects' external dependencies
 * `drip_list_items.repository_url` and `repositories.canonical_url` store lower-cased URLs without a "https://" prefix
 
 ### Migrations

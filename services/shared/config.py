@@ -1,6 +1,7 @@
 """
 Configuration management using Pydantic Settings
 """
+
 import os
 from typing import Optional
 
@@ -152,6 +153,24 @@ class SecurityConfig(BaseSettings):
         return v
 
 
+class ObjectStorageConfig(BaseSettings):
+    """
+    S3-compatible object storage configuration for analysis artifacts
+
+    Provides connection, authentication, and naming settings for writing analysis outputs to MinIO/S3
+    """
+
+    ENDPOINT_URL: Optional[str] = Field(None, env="S3_ENDPOINT_URL")
+    ACCESS_KEY: Optional[str] = Field(None, env="S3_ACCESS_KEY_ID")
+    SECRET_KEY: Optional[str] = Field(None, env="S3_SECRET_ACCESS_KEY")
+    REGION: str = Field("eu-west-1", env="S3_REGION")
+    BUCKET: Optional[str] = Field(None, env="S3_BUCKET")
+    FORCE_PATH_STYLE: bool = Field(True, env="S3_FORCE_PATH_STYLE")
+    ARTIFACTS_PREFIX: str = Field("gardener/v1", env="S3_ARTIFACTS_PREFIX")
+
+    model_config = {"env_file": ".env", "secrets_dir": "/run/secrets"}
+
+
 class Settings(BaseSettings):
     """
     Main settings combining all configuration sections
@@ -171,6 +190,7 @@ class Settings(BaseSettings):
     database: DatabaseConfig = DatabaseConfig()
     redis: RedisConfig = RedisConfig()
     security: SecurityConfig = SecurityConfig()
+    object_storage: ObjectStorageConfig = Field(default_factory=ObjectStorageConfig)
 
     # Environment
     ENVIRONMENT: str = "development"
@@ -187,6 +207,8 @@ class Settings(BaseSettings):
         """
         super().__init__(**kwargs)
         self.database.DATABASE_URL = _build_database_url(self.database)
+        # Hydrate nested object storage from environment in case nested BaseSettings missed env
+        self._hydrate_object_storage_from_env()
         # Derive version from installed package metadata when possible
         # Fallback to env SERVICE_VERSION (if provided), else keep default
         derived = None
@@ -199,6 +221,37 @@ class Settings(BaseSettings):
         self.SERVICE_VERSION = derived or env_override or self.SERVICE_VERSION
         # Apply basic production guardrails
         self._validate_production_safety()
+
+    def _hydrate_object_storage_from_env(self):
+        """
+        Populate object storage fields from environment if missing
+
+        Ensures that when nested settings are default-constructed, any absent
+        values are filled from os.environ so validation reflects the real env
+        """
+        oscfg = self.object_storage
+        # Read env directly to avoid reliance on nested BaseSettings behavior
+        env = os.environ
+        if not oscfg.ENDPOINT_URL:
+            oscfg.ENDPOINT_URL = env.get("S3_ENDPOINT_URL") or env.get("MINIO_ENDPOINT")
+        if not oscfg.ACCESS_KEY:
+            oscfg.ACCESS_KEY = env.get("S3_ACCESS_KEY_ID") or env.get("MINIO_ROOT_USER") \
+                or env.get("MINIO_ACCESS_KEY")
+        if not oscfg.SECRET_KEY:
+            oscfg.SECRET_KEY = env.get("S3_SECRET_ACCESS_KEY") or env.get("MINIO_ROOT_PASSWORD") \
+                or env.get("MINIO_SECRET_KEY")
+        if not oscfg.BUCKET:
+            oscfg.BUCKET = env.get("S3_BUCKET") or env.get("MINIO_BUCKET")
+        # Optional values: allow env to override defaults if provided
+        region = env.get("S3_REGION")
+        if region:
+            oscfg.REGION = region
+        fps = env.get("S3_FORCE_PATH_STYLE")
+        if fps is not None:
+            oscfg.FORCE_PATH_STYLE = str(fps).strip().lower() in ("1", "true", "yes")
+        prefix = env.get("S3_ARTIFACTS_PREFIX")
+        if prefix:
+            oscfg.ARTIFACTS_PREFIX = prefix
 
     def _validate_production_safety(self):
         """Fail fast on unsafe production configuration
@@ -222,6 +275,16 @@ class Settings(BaseSettings):
         hosts_raw = hosts_env if hosts_env is not None else self.api.ALLOWED_HOSTS_RAW
         if str(hosts_raw).strip() == "*":
             raise ValueError("ALLOWED_HOSTS must not be '*' in production")
+
+        # 3) Ensure object storage vars are present in production
+        if not self.object_storage.ENDPOINT_URL:
+            raise ValueError("S3_ENDPOINT_URL must be set in production")
+        if not self.object_storage.ACCESS_KEY:
+            raise ValueError("S3_ACCESS_KEY_ID must be set in production")
+        if not self.object_storage.SECRET_KEY:
+            raise ValueError("S3_SECRET_ACCESS_KEY must be set in production")
+        if not self.object_storage.BUCKET:
+            raise ValueError("S3_BUCKET must be set in production")
 
 
 # Global settings instance
