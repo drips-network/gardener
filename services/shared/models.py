@@ -14,13 +14,12 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    LargeBinary,
     Numeric,
     String,
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import BYTEA, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 
@@ -39,6 +38,17 @@ class JobStatus(enum.Enum):
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+
+
+class ArtifactType(enum.Enum):
+    """
+    Artifact types persisted in object storage
+
+    Enumerates the serialized artifact categories saved for each analysis job
+    """
+
+    GRAPH_PICKLE = "GRAPH_PICKLE"
+    RESULTS_JSON = "RESULTS_JSON"
 
 
 class Repository(Base):
@@ -76,7 +86,6 @@ class AnalysisJob(Base):
     repository_id = Column(UUID(as_uuid=True), ForeignKey("repositories.id"), nullable=False)
     commit_sha = Column(String(64), nullable=False)
     status = Column(Enum(JobStatus), nullable=False, default=JobStatus.PENDING)
-    graph_data_gz = Column(LargeBinary, nullable=True)  # Phase 1: Compressed graph artifact
     # Optional runtime prediction for client progress bars
     predicted_duration_seconds = Column(Numeric(10, 3), nullable=True)
     error_message = Column(Text, nullable=True)
@@ -91,6 +100,7 @@ class AnalysisJob(Base):
     analysis_metadata = relationship(
         "AnalysisMetadata", back_populates="job", uselist=False, cascade="all, delete-orphan"
     )
+    artifacts = relationship("AnalysisArtifact", back_populates="job", cascade="all, delete-orphan")
 
     # Constraints - Removed unique constraint on (repository_id, commit_sha)
     __table_args__ = (
@@ -165,3 +175,34 @@ class PackageUrlCache(Base):
     ecosystem = Column(String(20), primary_key=True)
     resolved_url = Column(Text, nullable=False)
     resolved_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+
+class AnalysisArtifact(Base):
+    """
+    Pointer and metadata for S3-stored analysis artifacts
+
+    Stores object storage coordinates and checksums for serialized analysis outputs
+    """
+
+    __tablename__ = "analysis_artifacts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("analysis_jobs.id", ondelete="CASCADE"), nullable=False)
+    artifact_type = Column(Enum(ArtifactType), nullable=False)
+    bucket = Column(Text, nullable=False)
+    object_key = Column(Text, nullable=False)
+    content_type = Column(String(100), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    etag = Column(String(128), nullable=True)
+    checksum_md5 = Column(String(32), nullable=True)
+    checksum_sha256 = Column(String(64), nullable=True)
+    version_id = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+    job = relationship("AnalysisJob", back_populates="artifacts")
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "artifact_type", name="uq_artifact_job_type"),
+        Index("idx_artifacts_job", "job_id"),
+        Index("idx_artifacts_type", "artifact_type"),
+    )
