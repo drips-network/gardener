@@ -1,4 +1,4 @@
-# 🧤 Tests
+# Tests
 
 Test suite covering language handlers, graph building, URL resolution, microservice endpoints, and robustness edge cases.
 

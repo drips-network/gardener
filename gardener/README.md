@@ -1,9 +1,9 @@
-# 🧤 Core
+# Core
 
 Type‑safe, deterministic static analysis that builds a multi-language dependency graph and ranks external dependencies by graph centrality scores.
 
 ## Table of contents
-- [🧤 Core](#-core)
+- [Core](#-core)
   - [Table of contents](#table-of-contents)
   - [Quick start](#quick-start)
   - [Analysis pipeline](#analysis-pipeline)

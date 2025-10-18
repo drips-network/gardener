@@ -1,9 +1,10 @@
-# 🧤 Services
+# Services
 
 REST API and background worker architecture for running Gardener's **[core dependency analysis](../gardener/README.md)**), persisting results, and serving recommended Drip Lists for the [Drips Network app](https://www.drips.network/app).
 
+
 ## Table of contents
-- [🧤 Services](#-services)
+- [Services](#-services)
   - [Table of contents](#table-of-contents)
   - [Architecture](#architecture)
     - [Components](#components)

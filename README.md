@@ -1,12 +1,11 @@
-# 🧤 Gardener
+```
+                                              ▌
+                                       ▛▌▀▌▛▘▛▌█▌▛▌█▌▛▘
+                                       ▙▌█▌▌ ▙▌▙▖▌▌▙▖▌
+                                       ▄▌
+```
 
-Gardener is a **static dependency analysis** tool that builds import graphs from any supported project's source code and analyzes them to produce **recommendations for distributing OSS funding across that project's external dependencies** via [Drip Lists](https://docs.drips.network/support-your-dependencies/overview/).
-
-> *"If you really want to be a good gardener, you need to understand what is going on in your soil" — Jeff Lowenfels*
-
-> *"Feed the soil, not your plants" — Charles Dowding*
-
-⚠️ **Status**: actively developed. Interfaces may evolve.
+This is a **static dependency analysis** tool that builds import graphs from any supported project's source code and analyzes them to produce **recommendations for distributing OSS funding across that project's external dependencies** via [Drip Lists](https://docs.drips.network/support-your-dependencies/overview/).
 
 ## What Gardener does
 
