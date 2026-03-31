@@ -23,25 +23,15 @@ RUN groupadd -r gardener && useradd -r -g gardener -m gardener
 # Set working directory
 WORKDIR /app
 
-# Install uv and project dependencies via packaging extras
+# Install uv and configure the project virtualenv on PATH
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-# uv installs to ~/.local/bin by default on Debian slim
-ENV PATH="/root/.local/bin:${PATH}"
+ENV PATH="/app/.venv/bin:/root/.local/bin:${PATH}"
 
-# Copy packaging metadata and source, then install service extras
-# Copy application code (services) early to allow optional pinned install
-COPY services /app/services
-
-COPY pyproject.toml README.md /app/
+# Copy packaging metadata, lockfile, and source, then sync the locked service environment
+COPY pyproject.toml uv.lock README.md /app/
 COPY gardener /app/gardener
-# Optionally use pinned requirements for reproducible builds if present
-RUN if [ -f /app/services/requirements.txt ]; then \
-        uv pip install --system -r /app/services/requirements.txt ; \
-    else \
-        uv pip install --system -e ".[service]" ; \
-    fi
-
-# (services already copied above)
+COPY services /app/services
+RUN uv sync --locked --no-dev --extra service --no-editable
 
 # Create necessary directories and set ownership
 RUN mkdir -p /app/logs && chown -R gardener:gardener /app

@@ -51,5 +51,3 @@ coverage.xml
 *.log
 .cache/
 
-# uv project lock
-uv.lock

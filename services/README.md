@@ -251,7 +251,8 @@ Create two services (API + Worker) pointing to this repository, add Postgres and
 
 **API**
 
-* **Build**: `pip install --upgrade pip && pip install -e '.[service]'`
+* **Build**: use `services/api/Dockerfile`, which runs `uv sync --locked --no-dev --extra service --no-editable`
+  against the committed `uv.lock` and fails if the lockfile is missing or out of date
 * **Start**: `uvicorn services.api.app.main:app --host 0.0.0.0 --port ${PORT:-8080} --proxy-headers`
 * **Variables**:
   * `ENVIRONMENT=production`, `DEBUG=false`
@@ -269,8 +270,9 @@ Create two services (API + Worker) pointing to this repository, add Postgres and
 
 **Worker**
 
-* **Build**: `pip install --upgrade pip && pip install -e '.[service]' && cd gardener/external_helpers/hardhat_config_parser && npm ci --omit=dev`
-  * This installs the Hardhat parser helper, which is optional but recommended to support Solidity projects
+* **Build**: use `services/worker/Dockerfile`, which keeps the existing `npm ci --omit=dev`
+  for the Hardhat helper and runs `uv sync --locked --no-dev --extra service --no-editable`
+  against the committed `uv.lock`
 * **Start**: `celery -A services.worker.app.main worker --loglevel=info --concurrency=1 -n gardener-worker@%h`
 * **Variables**:
   `ENVIRONMENT=production`, `DEBUG=false`,
