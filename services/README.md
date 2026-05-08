@@ -11,6 +11,7 @@ REST API and background worker architecture for running Gardener's **[core depen
   - [Quick start](#quick-start)
     - [Local development with Docker Compose](#local-development-with-docker-compose)
   - [Object storage](#object-storage)
+  - [Analysis artifacts and API boundary](#analysis-artifacts-and-api-boundary)
   - [API endpoints](#api-endpoints)
     - [Health check](#health-check)
     - [Submit analysis](#submit-analysis)
@@ -134,6 +135,12 @@ Environment variables (API and Worker):
 
 Ensure to create the bucket once via `mc` or `aws`.
 
+## Analysis artifacts and API boundary
+
+Worker-generated `results.json` artifacts include the core analyzer's dependency classification and provenance metadata: `schema_version`, `producer`, `repository` (with `canonical_url` and `commit_sha`), `invocation`, dependency classification fields on `top_dependencies`, and URL-resolution status.
+
+The latest-results API returns Drip List rows (`package_name`, `package_url`, `split_percentage`). Consumers that need classification or provenance metadata should read the stored `results.json` artifact directly.
+
 ## API endpoints
 
 ### Health check
@@ -222,6 +229,7 @@ GET /api/v1/repositories/results/latest?repository_url=github.com/owner/repo
 * No authentication required
 * `repository_url` may be prefixed with `https://`, but `repository_url` at this endpoint also accepts `forge.com/owner/repo` patterns
 * ⚠️ The scored dependencies in the final recommended Drip List are limited to dependencies hosted on GitHub, as currently GitHub is the only forge that Drips's funding and claiming flows support
+* For dependency classification and provenance metadata, read the stored `results.json` artifact; this endpoint returns Drip List rows only
 
 **Response**:
 ```json

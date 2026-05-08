@@ -36,6 +36,15 @@ class FilePersistence(PersistenceInterface):
 
         self.logger.info(f"\nAnalysis results saved to: {output_path}")
 
+    def save_machine_summary(self, summary, identifier):
+        """Save machine summary as JSON file"""
+        output_path = self.get_output_path(identifier, "_dependency_summary.json")
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, default=str)
+
+        self.logger.info(f"Machine summary saved to: {output_path}")
+
     def save_graph_visualization(self, graph_html, identifier):
         """Save graph visualization as HTML file"""
         output_path = self.get_output_path(identifier, "_dependency_graph.html")

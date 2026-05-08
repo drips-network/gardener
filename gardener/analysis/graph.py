@@ -8,6 +8,7 @@ import networkx as nx
 from gardener.common.language_detection import filename_to_lang
 
 from gardener.analysis.centrality import CentralityCalculator
+from gardener.analysis.evidence import classify_dependency_fact
 from gardener.common.defaults import GraphAnalysisConfig as cfg
 
 
@@ -241,7 +242,20 @@ class DependencyGraphBuilder:
         """
         return self._STDLIB_ECOSYSTEM_MAP.get(lang, "unknown_stdlib")
 
-    def _create_package_node(self, G, node_id, ecosystem, distribution_name, import_names):
+    def _create_package_node(
+        self,
+        G,
+        node_id,
+        ecosystem,
+        distribution_name,
+        import_names,
+        *,
+        dependency_kind,
+        normalized_name,
+        runtime=None,
+        repository_url="",
+        url_resolution_status="not-applicable",
+    ):
         """
         Ensure a package node is present with attributes and mark as object node
 
@@ -251,6 +265,11 @@ class DependencyGraphBuilder:
             ecosystem (str): Ecosystem label
             distribution_name (str): Distribution name to store on node
             import_names (list): Import names associated to the distribution
+            dependency_kind (str): Evidence-layer dependency classification
+            normalized_name (str): Evidence-layer normalized dependency name
+            runtime (str | None): Runtime/platform identity for builtin dependencies
+            repository_url (str): Resolved package repository URL
+            url_resolution_status (str): Evidence-layer URL resolution status
         """
         G.add_node(
             node_id,
@@ -258,6 +277,11 @@ class DependencyGraphBuilder:
             ecosystem=ecosystem,
             distribution_name=distribution_name,
             import_names=import_names,
+            dependency_kind=dependency_kind,
+            normalized_name=normalized_name,
+            runtime=runtime,
+            repository_url=repository_url,
+            url_resolution_status=url_resolution_status,
         )
         self.object_nodes.add(node_id)
 
@@ -347,14 +371,21 @@ class DependencyGraphBuilder:
         """
         for dist_name, pkg_data in external_packages.items():
             ecosystem = pkg_data.get("ecosystem", "unknown")
-            G.add_node(
+            classification = classify_dependency_fact(
                 dist_name,
-                type="package",
                 ecosystem=ecosystem,
-                distribution_name=dist_name,
-                import_names=pkg_data.get("import_names", [dist_name]),
+                is_package_manager=True,
+                repository_url=pkg_data.get("repository_url", ""),
             )
-            self.object_nodes.add(dist_name)
+            self._create_package_node(
+                G,
+                dist_name,
+                ecosystem,
+                dist_name,
+                pkg_data.get("import_names", [dist_name]),
+                repository_url=pkg_data.get("repository_url", ""),
+                **classification,
+            )
             if self.logger:
                 self.logger.debug(f"Added package node: {dist_name} (ecosystem: {ecosystem})")
 
@@ -418,7 +449,8 @@ class DependencyGraphBuilder:
             ecosystem = self._stdlib_ecosystem_for_language(file_lang)
         elif file_lang == "typescript":
             ecosystem = self._stdlib_ecosystem_for_language(file_lang)
-        self._create_package_node(G, package_name, ecosystem, package_name, [package_name])
+        classification = classify_dependency_fact(package_name, ecosystem=ecosystem, language=file_lang)
+        self._create_package_node(G, package_name, ecosystem, package_name, [package_name], **classification)
         self.import_to_node[package_name] = package_name
         dist_node = package_name
         dist_node_for_edge = dist_node
@@ -443,7 +475,21 @@ class DependencyGraphBuilder:
         distribution_name_attr = dist_node
         ecosystem = self.external_packages[package_name].get("ecosystem", "npm")
         import_names_attr = self.external_packages[package_name].get("import_names", [package_name])
-        self._create_package_node(G, node_id_to_add, ecosystem, distribution_name_attr, import_names_attr)
+        classification = classify_dependency_fact(
+            distribution_name_attr,
+            ecosystem=ecosystem,
+            is_package_manager=True,
+            repository_url=self.external_packages[package_name].get("repository_url", ""),
+        )
+        self._create_package_node(
+            G,
+            node_id_to_add,
+            ecosystem,
+            distribution_name_attr,
+            import_names_attr,
+            repository_url=self.external_packages[package_name].get("repository_url", ""),
+            **classification,
+        )
         self.import_to_node[package_name] = node_id_to_add
 
     def _ensure_unknown_or_stdlib_node_if_missing(self, G, package_name, dist_node, dist_node_for_edge, ecosystem):
@@ -463,7 +509,16 @@ class DependencyGraphBuilder:
         elif dist_node == "path":
             distribution_name_attr = node_id_to_add
 
-        self._create_package_node(G, node_id_to_add, ecosystem, distribution_name_attr, import_names_attr)
+        language = ecosystem.removesuffix("_stdlib") if str(ecosystem).endswith("_stdlib") else None
+        classification = classify_dependency_fact(package_name, ecosystem=ecosystem, language=language)
+        self._create_package_node(
+            G,
+            node_id_to_add,
+            ecosystem,
+            distribution_name_attr,
+            import_names_attr,
+            **classification,
+        )
         if dist_node == "node:fs":
             self.import_to_node["fs"] = node_id_to_add
             self.import_to_node["node:fs"] = node_id_to_add
@@ -561,11 +616,22 @@ class DependencyGraphBuilder:
 
         return full_component_name, simple_name_for_attr
 
-    def _ensure_component_node_and_contains_edge(self, G, component_node_id, pkg_name, dist, ecosystem, simple_name):
+    def _ensure_component_node_and_contains_edge(
+        self,
+        G,
+        component_node_id,
+        pkg_name,
+        dist,
+        ecosystem,
+        simple_name,
+        parent_node_id,
+    ):
         """
         Ensure component node exists and add contains_component edge from the package distribution
         """
         if not G.has_node(component_node_id):
+            dist_node_for_contains = self.import_to_node.get(pkg_name, pkg_name)
+            parent_attrs = G.nodes[parent_node_id] if G.has_node(parent_node_id) else {}
             G.add_node(
                 component_node_id,
                 type="package_component",
@@ -573,9 +639,13 @@ class DependencyGraphBuilder:
                 distribution_name=dist,
                 ecosystem=ecosystem,
                 component=simple_name,
+                dependency_kind=parent_attrs.get("dependency_kind"),
+                normalized_name=parent_attrs.get("normalized_name"),
+                runtime=parent_attrs.get("runtime"),
+                repository_url=parent_attrs.get("repository_url", ""),
+                url_resolution_status=parent_attrs.get("url_resolution_status", "not-applicable"),
             )
             self.object_nodes.add(component_node_id)
-            dist_node_for_contains = self.import_to_node.get(pkg_name, pkg_name)
             if G.has_node(dist_node_for_contains):
                 self._add_edge(
                     G,
@@ -640,6 +710,7 @@ class DependencyGraphBuilder:
                     dist,
                     ecosystem,
                     simple_name_for_attr,
+                    parent_node_id=dist_node,
                 )
 
                 self._add_uses_component_edge_if_applicable(

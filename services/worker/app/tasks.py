@@ -12,6 +12,7 @@ from uuid import UUID
 import networkx as nx
 from celery import Task
 
+from gardener.analysis.evidence import build_repository_metadata
 from gardener.analysis.main import DependencyAnalyzer
 from gardener.common.subprocess import SecureSubprocess, SubprocessSecurityError
 from gardener.common.utils import get_logger
@@ -270,6 +271,7 @@ def analyze_repo_task(job_id, drip_list_max_length=200, force_url_refresh=False)
             db.commit()
 
             repo_url = job.repository.url
+            canonical_url = job.repository.canonical_url
             logger.info(f"Analyzing repository: {repo_url}")
 
         # Create temporary directory for cloning
@@ -291,7 +293,25 @@ def analyze_repo_task(job_id, drip_list_max_length=200, force_url_refresh=False)
 
             try:
                 # 1. Create analyzer and discover packages from manifests
-                analyzer = DependencyAnalyzer(verbose=True)
+                repository_metadata = build_repository_metadata(
+                    input_value=repo_url,
+                    resolved_path=None,
+                    canonical_url=canonical_url,
+                    commit_sha=commit_sha,
+                )
+                invocation_metadata = {
+                    "entrypoint": "service-worker",
+                    "languages": None,
+                    "minimal_outputs": None,
+                    "visualize": None,
+                    "machine_summary": False,
+                    "config_overrides": {},
+                }
+                analyzer = DependencyAnalyzer(
+                    verbose=True,
+                    repository_metadata=repository_metadata,
+                    invocation_metadata=invocation_metadata,
+                )
                 external_packages = analyzer.discover_packages(repo_dir)
 
                 # 2. Query the cache for only the packages found

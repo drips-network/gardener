@@ -70,3 +70,7 @@ def test_typescript_fixture_graph_matches_spec(offline_mode):
     graph_data = results.get("dependency_graph", {})
     spec = load_graph_spec("tests/data/specs/typescript_micro.yml")
     assert_graph_matches_spec(graph_data, spec, lax=True)
+
+    package_nodes = [node for node in graph_data.get("nodes", []) if node.get("type") == "package"]
+    assert package_nodes
+    assert all("dependency_kind" in node for node in package_nodes)
