@@ -10,6 +10,7 @@ import os
 import re
 from pathlib import Path
 
+from gardener.analysis.scopes import sort_scopes
 from gardener.package_metadata.name_resolvers.go import GoResolver
 from gardener.package_metadata.name_resolvers.json_manifest import JsonManifestResolver
 from gardener.package_metadata.name_resolvers.python import PythonResolver
@@ -157,7 +158,16 @@ def _get_package_name_from_manifest(path, basename, secure_file_ops, logger, rep
     return None, None
 
 
-def process_manifests(manifest_files, language_handlers, secure_file_ops, logger):
+def process_manifests(
+    manifest_files,
+    language_handlers,
+    secure_file_ops,
+    logger,
+    *,
+    repo_path,
+    included_manifest_files,
+    manifest_scope_by_path,
+):
     """
     Process manifests using registered language handlers with deduplication semantics
 
@@ -166,40 +176,56 @@ def process_manifests(manifest_files, language_handlers, secure_file_ops, logger
         language_handlers (dict): Language handler instances keyed by language
         secure_file_ops (SecureFileOps|None): Secure file operations or None
         logger (Logger|None): Optional logger for status and errors
+        repo_path (str): Absolute repository path
+        included_manifest_files (list): Absolute manifest paths included as active evidence
+        manifest_scope_by_path (dict): Scope by absolute manifest path
 
     Returns:
         dict: External package metadata map keyed by distribution name
     """
     external_packages = {}
+    included_manifest_set = set(included_manifest_files)
 
     for manifest_path in list(manifest_files):
         basename = Path(manifest_path).name
         for handler_lang, handler in language_handlers.items():
             if basename not in handler.get_manifest_files():
                 continue
+
+            occurrence = _build_manifest_evidence(
+                manifest_path,
+                repo_path,
+                secure_file_ops,
+                manifest_scope_by_path,
+                included_manifest_set,
+            )
+            temp_packages = {}
             try:
-                temp_packages = {}
                 handler.process_manifest(manifest_path, temp_packages, secure_file_ops)
-                for package_name, package_info in temp_packages.items():
-                    if package_name in external_packages:
-                        external_packages[package_name] = _deduplicate_package(
-                            package_name,
-                            external_packages[package_name],
-                            package_info,
-                            manifest_path,
-                        )
-                    else:
-                        package_info["found_in_manifests"] = [manifest_path]
-                        external_packages[package_name] = package_info
             except Exception as exc:
                 if logger:
                     logger.exception(
                         f"Error processing manifest {manifest_path} with {handler_lang} handler"
                     )
+                continue
+
+            for package_name, package_info in temp_packages.items():
+                if package_name in external_packages:
+                    external_packages[package_name] = _deduplicate_package(
+                        package_name,
+                        external_packages[package_name],
+                        package_info,
+                        manifest_path,
+                        occurrence,
+                    )
+                else:
+                    package_info["found_in_manifests"] = [manifest_path]
+                    _add_manifest_evidence(package_info, occurrence)
+                    external_packages[package_name] = package_info
     return external_packages
 
 
-def _deduplicate_package(package_name, existing_package, new_package_info, manifest_path):
+def _deduplicate_package(package_name, existing_package, new_package_info, manifest_path, manifest_evidence):
     """
     Merge duplicate package entries while tracking version conflicts
 
@@ -208,13 +234,15 @@ def _deduplicate_package(package_name, existing_package, new_package_info, manif
         existing_package (dict): Current canonical package metadata
         new_package_info (dict): Newly parsed package metadata
         manifest_path (str): Manifest where the new entry was found
+        manifest_evidence (dict): Scope evidence for this manifest occurrence
 
     Returns:
         dict: Updated canonical package metadata
     """
     if "found_in_manifests" not in existing_package:
         existing_package["found_in_manifests"] = []
-    existing_package["found_in_manifests"].append(manifest_path)
+    _append_unique(existing_package["found_in_manifests"], manifest_path)
+    _add_manifest_evidence(existing_package, manifest_evidence)
 
     existing_version = existing_package.get("version", "")
     new_version = new_package_info.get("version", "")
@@ -245,6 +273,40 @@ def _deduplicate_package(package_name, existing_package, new_package_info, manif
             existing_package[key] = value
 
     return existing_package
+
+
+def _build_manifest_evidence(manifest_path, repo_path, secure_file_ops, manifest_scope_by_path, included_manifest_set):
+    try:
+        if secure_file_ops:
+            rel_path = secure_file_ops.get_relative_path(manifest_path)
+        else:
+            rel_path = str(Path(manifest_path).relative_to(repo_path))
+    except ValueError:
+        rel_path = os.path.relpath(manifest_path, repo_path)
+
+    return {
+        "path": Path(rel_path).as_posix(),
+        "scope": manifest_scope_by_path[manifest_path],
+        "included": manifest_path in included_manifest_set,
+    }
+
+
+def _add_manifest_evidence(package_info, occurrence):
+    evidence = package_info.setdefault("manifest_evidence", [])
+    if occurrence not in evidence:
+        evidence.append(occurrence)
+    _append_unique(package_info.setdefault("manifest_scopes", []), occurrence["scope"])
+    package_info["manifest_scopes"] = sort_scopes(package_info["manifest_scopes"])
+    if occurrence["included"]:
+        _append_unique(package_info.setdefault("manifest_evidence_scopes", []), occurrence["scope"])
+    else:
+        package_info.setdefault("manifest_evidence_scopes", [])
+    package_info["manifest_evidence_scopes"] = sort_scopes(package_info["manifest_evidence_scopes"])
+
+
+def _append_unique(values, value):
+    if value not in values:
+        values.append(value)
 
 
 def attach_import_names(external_packages, secure_file_ops, logger):

@@ -15,6 +15,7 @@ from gardener.analysis import js_ts_aliases
 from gardener.analysis import manifests
 from gardener.analysis import scanner
 from gardener.analysis import solidity_meta
+from gardener.analysis.scopes import ScopeFilter, classify_path_scope, sort_scopes
 from gardener.treewalk.solidity import SolidityLanguageHandler
 from gardener.common.secure_file_ops import FileOperationError, SecureFileOps
 
@@ -29,7 +30,7 @@ class RepositoryAnalyzer:
     Coordinates the analysis of repository source code to extract dependencies
     """
 
-    def __init__(self, repo_path, focus_languages=None, logger=None):
+    def __init__(self, repo_path, focus_languages=None, logger=None, scope_filter=None):
         """
         Initialize a new analyzer instance
 
@@ -37,6 +38,7 @@ class RepositoryAnalyzer:
             repo_path (str): Absolute path to the repository to analyze
             focus_languages (list|None): Optional list of languages to focus on
             logger (Logger|None): Optional logger instance
+            scope_filter (ScopeFilter|None): Scope filter controlling active evidence inputs
 
         Returns:
             None
@@ -44,6 +46,7 @@ class RepositoryAnalyzer:
         self.repo_path = repo_path
         self.logger = logger
         self.focus_languages = focus_languages
+        self.scope_filter = scope_filter or ScopeFilter.all()
 
         try:
             self.secure_file_ops = SecureFileOps(repo_path, logger)
@@ -56,11 +59,17 @@ class RepositoryAnalyzer:
 
         self.manifest_files = []
         self.root_manifest_files = []
+        self.included_manifest_files = []
+        self.included_root_manifest_files = []
+        self.manifest_scope_by_path = {}
+        self.scope_summary = {}
+        self.all_source_files = {}
         self.source_files = {}
         self.external_packages = {}
         self.file_imports = defaultdict(list)
         self.file_package_components = defaultdict(list)
         self.local_imports_map = defaultdict(list)
+        self.excluded_local_imports_map = defaultdict(list)
         self.root_package_names = set()
         self.go_module_path = None
         self.hardhat_remappings = {}
@@ -136,11 +145,17 @@ class RepositoryAnalyzer:
             focus_languages=self.focus_languages,
             language_handlers=self.language_handlers,
             logger=self.logger,
+            scope_filter=self.scope_filter,
         )
 
+        self.all_source_files = result["all_source_files"]
         self.source_files = result["source_files"]
         self.manifest_files = result["manifest_files"]
         self.root_manifest_files = result["root_manifest_files"]
+        self.included_manifest_files = result["included_manifest_files"]
+        self.included_root_manifest_files = result["included_root_manifest_files"]
+        self.manifest_scope_by_path = result["manifest_scope_by_path"]
+        self.scope_summary = result["scope_summary"]
         self.js_config_files = result["js_config_files"]
         self.ts_config_files = result["ts_config_files"]
         self.solidity_src_path = result["solidity_src_path"]
@@ -182,7 +197,13 @@ class RepositoryAnalyzer:
             self.go_module_path = go_module
 
         self.external_packages = manifests.process_manifests(
-            self.manifest_files, self.language_handlers, self.secure_file_ops, self.logger
+            self.manifest_files,
+            self.language_handlers,
+            self.secure_file_ops,
+            self.logger,
+            repo_path=self.repo_path,
+            included_manifest_files=self.included_manifest_files,
+            manifest_scope_by_path=self.manifest_scope_by_path,
         )
 
         if self.logger:
@@ -209,7 +230,7 @@ class RepositoryAnalyzer:
         self.js_ts_base_url = base_url
         self.js_ts_path_aliases = paths
         self.alias_resolver = js_ts_aliases.create_alias_resolver(
-            self.repo_path, self.source_files, self.js_ts_base_url, self.js_ts_path_aliases, self.logger
+            self.repo_path, self.all_source_files, self.js_ts_base_url, self.js_ts_path_aliases, self.logger
         )
 
         self.external_packages = solidity_meta.associate_submodules_with_solidity_packages(
@@ -233,6 +254,8 @@ class RepositoryAnalyzer:
     def _solidity_candidates_from_remappings(self, remappings_dict, source_name, sol_handler):
         if not remappings_dict:
             return
+
+        occurrence = self._solidity_remapping_evidence(source_name)
 
         # Use shared canonicalization to keep behavior consistent across helpers
 
@@ -264,15 +287,50 @@ class RepositoryAnalyzer:
                     "ecosystem": "solidity",
                     "source": f"{source_name}: {prefix}={path}",
                 }
+                self._add_solidity_remapping_evidence(self.external_packages[package_name], occurrence)
                 if self.logger:
                     self.logger.info(
                         f"  Identified potential external Solidity package '{package_name}' from {source_name} remapping: '{prefix}' -> '{path}'"  # noqa
                     )
             else:
-                if source_name not in self.external_packages[package_name].get("source", "") and self.logger:
+                self._add_solidity_remapping_evidence(self.external_packages[package_name], occurrence)
+                existing_source = self.external_packages[package_name].get("source") or "existing manifest/catalog entry"
+                if source_name not in existing_source and self.logger:
                     self.logger.debug(
-                        f"  Remapped package '{package_name}' (from {source_name}: '{prefix}' -> '{path}') already identified from {self.external_packages[package_name]['source']}"  # noqa
+                        f"  Remapped package '{package_name}' (from {source_name}: '{prefix}' -> '{path}') already identified from {existing_source}"  # noqa
                     )
+
+    def _solidity_remapping_evidence(self, source_name):
+        rel_path = "remappings.txt" if source_name == "remappings.txt" else self._hardhat_config_rel_path()
+        scope = classify_path_scope(rel_path)
+        return {
+            "path": rel_path,
+            "scope": scope,
+            "included": self.scope_filter.allows(scope),
+        }
+
+    def _hardhat_config_rel_path(self):
+        for manifest_path in self.manifest_files:
+            if Path(manifest_path).name in {"hardhat.config.js", "hardhat.config.ts"}:
+                try:
+                    if self.secure_file_ops:
+                        return Path(self.secure_file_ops.get_relative_path(manifest_path)).as_posix()
+                    return Path(manifest_path).relative_to(self.repo_path).as_posix()
+                except ValueError:
+                    return Path(os.path.relpath(manifest_path, self.repo_path)).as_posix()
+        return "hardhat.config.js"
+
+    def _add_solidity_remapping_evidence(self, package_info, occurrence):
+        evidence = package_info.setdefault("manifest_evidence", [])
+        if occurrence not in evidence:
+            evidence.append(occurrence)
+        manifest_scopes = set(package_info.get("manifest_scopes", []))
+        manifest_scopes.add(occurrence["scope"])
+        package_info["manifest_scopes"] = sort_scopes(manifest_scopes)
+        evidence_scopes = set(package_info.get("manifest_evidence_scopes", []))
+        if occurrence["included"]:
+            evidence_scopes.add(occurrence["scope"])
+        package_info["manifest_evidence_scopes"] = sort_scopes(evidence_scopes)
 
     def extract_imports_from_all_files(self):
         """
@@ -286,7 +344,7 @@ class RepositoryAnalyzer:
 
         self._local_resolver = imports_mod.LocalImportResolver(
             repo_path=self.repo_path,
-            source_files=self.source_files,
+            source_files=self.all_source_files,
             alias_resolver=self.alias_resolver,
             js_ts_base_url=self.js_ts_base_url,
             js_ts_path_aliases=self.js_ts_path_aliases,
@@ -306,8 +364,18 @@ class RepositoryAnalyzer:
             self.logger,
         )
 
+        included_local_imports_map = defaultdict(list)
+        excluded_local_imports_map = defaultdict(list)
+        for importing_file, imported_files in local_imports_map.items():
+            for imported_file in imported_files:
+                if imported_file in self.source_files:
+                    included_local_imports_map[importing_file].append(imported_file)
+                elif imported_file in self.all_source_files:
+                    excluded_local_imports_map[importing_file].append(imported_file)
+
         self.file_imports = file_imports
-        self.local_imports_map = local_imports_map
+        self.local_imports_map = included_local_imports_map
+        self.excluded_local_imports_map = excluded_local_imports_map
         self.file_package_components = file_package_components
 
     def _get_local_resolver(self):
@@ -320,7 +388,7 @@ class RepositoryAnalyzer:
         if self._local_resolver is None:
             self._local_resolver = imports_mod.LocalImportResolver(
                 repo_path=self.repo_path,
-                source_files=self.source_files,
+                source_files=self.all_source_files,
                 alias_resolver=self.alias_resolver,
                 js_ts_base_url=self.js_ts_base_url,
                 js_ts_path_aliases=self.js_ts_path_aliases,

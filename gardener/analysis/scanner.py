@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pathspec
 
+from gardener.analysis.scopes import SCOPE_ORDER, ScopeFilter, classify_path_scope
 from gardener.common.defaults import ResourceLimits
 from gardener.common.language_detection import filename_to_lang
 
@@ -211,9 +212,11 @@ def _scan_secure(repo_path, secure_file_ops, gitignore_spec, all_manifest_files,
                 if language is None:
                     language = {".cjs": "javascript", ".mjs": "javascript", ".svelte": "javascript"}.get(ext)
                 if language and language in active_languages:
-                    source_files[str(Path(rel_path))] = {
+                    normalized_rel_path = str(Path(rel_path))
+                    source_files[normalized_rel_path] = {
                         "absolute_path": full_path,
                         "language": language,
+                        "scope": classify_path_scope(normalized_rel_path),
                     }
 
     _scan_dir_recursive(repo_path)
@@ -289,7 +292,11 @@ def _scan_standard(repo_path, gitignore_spec, all_manifest_files, all_extensions
                 if language is None:
                     language = {".cjs": "javascript", ".mjs": "javascript", ".svelte": "javascript"}.get(ext)
                 if language and language in active_languages:
-                    source_files[rel_path] = {"absolute_path": file_path, "language": language}
+                    source_files[rel_path] = {
+                        "absolute_path": file_path,
+                        "language": language,
+                        "scope": classify_path_scope(rel_path),
+                    }
 
     return (
         source_files,
@@ -353,7 +360,45 @@ def parse_gitmodules(repo_path, secure_file_ops, logger):
         return {}
 
 
-def scan_repository(repo_path, secure_file_ops, focus_languages, language_handlers, logger):
+def _manifest_scope_by_path(manifest_files, repo_path, secure_file_ops):
+    scopes = {}
+    for manifest_path in manifest_files:
+        try:
+            if secure_file_ops:
+                rel_path = secure_file_ops.get_relative_path(manifest_path)
+            else:
+                rel_path = str(Path(manifest_path).relative_to(repo_path))
+        except ValueError:
+            rel_path = os.path.relpath(manifest_path, repo_path)
+        scopes[manifest_path] = classify_path_scope(str(Path(rel_path)))
+    return scopes
+
+
+def _count_scopes(scopes):
+    counts = {scope: 0 for scope in SCOPE_ORDER}
+    for scope in scopes:
+        counts[scope] += 1
+    return {scope: count for scope, count in counts.items() if count > 0}
+
+
+def _build_scope_summary(all_source_files, source_files, manifest_scope_by_path, included_manifest_files):
+    included_manifest_set = set(included_manifest_files)
+    return {
+        "classifier": ScopeFilter.all().to_metadata()["classifier"],
+        "source_files": {
+            "all": _count_scopes(file_info["scope"] for file_info in all_source_files.values()),
+            "included": _count_scopes(file_info["scope"] for file_info in source_files.values()),
+        },
+        "manifest_files": {
+            "all": _count_scopes(manifest_scope_by_path.values()),
+            "included": _count_scopes(
+                scope for path, scope in manifest_scope_by_path.items() if path in included_manifest_set
+            ),
+        },
+    }
+
+
+def scan_repository(repo_path, secure_file_ops, focus_languages, language_handlers, logger, scope_filter=None):
     """
     High-level entry point
 
@@ -363,11 +408,15 @@ def scan_repository(repo_path, secure_file_ops, focus_languages, language_handle
         focus_languages (list|None): Subset of languages to analyze or None for all
         language_handlers (dict): Language handler instances keyed by language
         logger (Logger|None): Optional logger for progress and warnings
+        scope_filter (ScopeFilter|None): Scope filter controlling active evidence inputs
 
     Returns:
-        dict: Keys: source_files, manifest_files, root_manifest_files, js_config_files,
-            ts_config_files, solidity_src_path, submodule_data, gitignore_spec
+        dict: Keys: all_source_files, source_files, manifest_files, root_manifest_files,
+            included_manifest_files, included_root_manifest_files, manifest_scope_by_path,
+            scope_summary, js_config_files, ts_config_files, solidity_src_path,
+            submodule_data, gitignore_spec
     """
+    scope_filter = scope_filter or ScopeFilter.all()
     gitignore_spec = load_gitignore(secure_file_ops, logger)
 
     active_languages = focus_languages or list(language_handlers.keys())
@@ -413,13 +462,40 @@ def scan_repository(repo_path, secure_file_ops, focus_languages, language_handle
             logger,
         )
 
+    all_source_files = source_files
+    source_files = {
+        rel_path: file_info
+        for rel_path, file_info in all_source_files.items()
+        if scope_filter.allows(file_info["scope"])
+    }
+    manifest_scope_by_path = _manifest_scope_by_path(manifest_files, repo_path, secure_file_ops)
+    included_manifest_files = [
+        manifest_path for manifest_path in manifest_files if scope_filter.allows(manifest_scope_by_path[manifest_path])
+    ]
+    included_root_manifest_files = [
+        manifest_path
+        for manifest_path in root_manifest_files
+        if scope_filter.allows(manifest_scope_by_path[manifest_path])
+    ]
+    scope_summary = _build_scope_summary(
+        all_source_files,
+        source_files,
+        manifest_scope_by_path,
+        included_manifest_files,
+    )
+
     solidity_src_path = _parse_foundry_src_path(secure_file_ops, logger)
     submodule_data = parse_gitmodules(repo_path, secure_file_ops, logger)
 
     return {
+        "all_source_files": all_source_files,
         "source_files": source_files,
         "manifest_files": manifest_files,
         "root_manifest_files": root_manifest_files,
+        "included_manifest_files": included_manifest_files,
+        "included_root_manifest_files": included_root_manifest_files,
+        "manifest_scope_by_path": manifest_scope_by_path,
+        "scope_summary": scope_summary,
         "js_config_files": js_config_files,
         "ts_config_files": ts_config_files,
         "solidity_src_path": solidity_src_path,

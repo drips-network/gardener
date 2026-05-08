@@ -9,6 +9,7 @@ from gardener.common.language_detection import filename_to_lang
 
 from gardener.analysis.centrality import CentralityCalculator
 from gardener.analysis.evidence import classify_dependency_fact
+from gardener.analysis.scopes import classify_path_scope, sort_scopes
 from gardener.common.defaults import GraphAnalysisConfig as cfg
 
 
@@ -255,6 +256,8 @@ class DependencyGraphBuilder:
         runtime=None,
         repository_url="",
         url_resolution_status="not-applicable",
+        manifest_scopes=None,
+        manifest_evidence_scopes=None,
     ):
         """
         Ensure a package node is present with attributes and mark as object node
@@ -282,6 +285,8 @@ class DependencyGraphBuilder:
             runtime=runtime,
             repository_url=repository_url,
             url_resolution_status=url_resolution_status,
+            manifest_scopes=sort_scopes(manifest_scopes or []),
+            manifest_evidence_scopes=sort_scopes(manifest_evidence_scopes or []),
         )
         self.object_nodes.add(node_id)
 
@@ -342,62 +347,87 @@ class DependencyGraphBuilder:
 
     def _add_file_nodes(self, G, source_files):
         """
-        Create file nodes with language attribute
+        Create file nodes with language and scope attributes
 
         Args:
             G (networkx.DiGraph): Graph instance
-            source_files (dict): Map of relative path -> absolute path
+            source_files (dict): Map of relative path -> file metadata
         """
         all_files = set(source_files.keys())
         for rel_path in all_files:
-            abs_path = source_files.get(rel_path)
-            if not abs_path:
+            file_info = source_files.get(rel_path)
+            if not file_info:
                 if self.logger:
                     self.logger.warning(f"Absolute path not found for {rel_path}, skipping file node")
                 continue
 
-            language = self._detect_language_from_filename(rel_path)
-            G.add_node(rel_path, type="file", language=language)
+            language, scope = self._source_file_language_and_scope(rel_path, file_info)
+            G.add_node(rel_path, type="file", language=language, scope=scope)
             if self.logger:
-                self.logger.debug(f"Added file node: {rel_path} (lang: {language})")
+                self.logger.debug(f"Added file node: {rel_path} (lang: {language}, scope: {scope})")
+
+    def _source_file_language_and_scope(self, rel_path, file_info):
+        if isinstance(file_info, dict):
+            return (
+                file_info.get("language") or self._detect_language_from_filename(rel_path),
+                file_info.get("scope") or classify_path_scope(rel_path),
+            )
+        return self._detect_language_from_filename(rel_path), classify_path_scope(rel_path)
 
     def _add_external_package_nodes(self, G, external_packages):
         """
-        Add one node per distribution name and map each import_name -> dist_name
+        Add active manifest-backed package nodes and map each import_name -> dist_name
 
         Args:
             G (networkx.DiGraph): Graph instance
             external_packages (dict): External packages metadata
         """
         for dist_name, pkg_data in external_packages.items():
-            ecosystem = pkg_data.get("ecosystem", "unknown")
-            classification = classify_dependency_fact(
-                dist_name,
-                ecosystem=ecosystem,
-                is_package_manager=True,
-                repository_url=pkg_data.get("repository_url", ""),
-            )
-            repository_url_resolution = pkg_data.get("repository_url_resolution")
-            if isinstance(repository_url_resolution, dict):
-                classification["url_resolution_status"] = repository_url_resolution["status"]
-            self._create_package_node(
-                G,
-                dist_name,
-                ecosystem,
-                dist_name,
-                pkg_data.get("import_names", [dist_name]),
-                repository_url=pkg_data.get("repository_url", ""),
-                **classification,
-            )
-            if self.logger:
-                self.logger.debug(f"Added package node: {dist_name} (ecosystem: {ecosystem})")
-
             for import_name in pkg_data.get("import_names", [dist_name]):
-                # Respect deterministic import->distribution resolution if present
                 resolved_dist = self.import_to_dist.get(import_name, dist_name)
                 self.import_to_node[import_name] = resolved_dist
                 if self.logger:
                     self.logger.debug(f"Mapped import '{import_name}' to distribution node '{resolved_dist}'")
+
+            if self._package_has_active_manifest_evidence(pkg_data):
+                self._ensure_external_package_node(G, dist_name)
+                if self.logger:
+                    ecosystem = pkg_data.get("ecosystem", "unknown")
+                    self.logger.debug(f"Added package node: {dist_name} (ecosystem: {ecosystem})")
+
+    def _package_has_active_manifest_evidence(self, pkg_data):
+        return "manifest_evidence_scopes" not in pkg_data or bool(pkg_data.get("manifest_evidence_scopes"))
+
+    def _package_data_for_distribution(self, dist_name):
+        return self.external_packages.get(dist_name)
+
+    def _ensure_external_package_node(self, G, dist_name):
+        if G.has_node(dist_name):
+            return
+        pkg_data = self._package_data_for_distribution(dist_name)
+        if not pkg_data:
+            return
+        ecosystem = pkg_data.get("ecosystem", "unknown")
+        classification = classify_dependency_fact(
+            dist_name,
+            ecosystem=ecosystem,
+            is_package_manager=True,
+            repository_url=pkg_data.get("repository_url", ""),
+        )
+        repository_url_resolution = pkg_data.get("repository_url_resolution")
+        if isinstance(repository_url_resolution, dict):
+            classification["url_resolution_status"] = repository_url_resolution["status"]
+        self._create_package_node(
+            G,
+            dist_name,
+            ecosystem,
+            dist_name,
+            pkg_data.get("import_names", [dist_name]),
+            repository_url=pkg_data.get("repository_url", ""),
+            manifest_scopes=pkg_data.get("manifest_scopes", []),
+            manifest_evidence_scopes=pkg_data.get("manifest_evidence_scopes", []),
+            **classification,
+        )
 
     def _resolve_dist_node_for_import(self, package_name):
         """
@@ -474,29 +504,8 @@ class DependencyGraphBuilder:
         """
         Create a known external package node if absent, using manifest metadata
         """
-        node_id_to_add = dist_node
-        distribution_name_attr = dist_node
-        ecosystem = self.external_packages[package_name].get("ecosystem", "npm")
-        import_names_attr = self.external_packages[package_name].get("import_names", [package_name])
-        classification = classify_dependency_fact(
-            distribution_name_attr,
-            ecosystem=ecosystem,
-            is_package_manager=True,
-            repository_url=self.external_packages[package_name].get("repository_url", ""),
-        )
-        repository_url_resolution = self.external_packages[package_name].get("repository_url_resolution")
-        if isinstance(repository_url_resolution, dict):
-            classification["url_resolution_status"] = repository_url_resolution["status"]
-        self._create_package_node(
-            G,
-            node_id_to_add,
-            ecosystem,
-            distribution_name_attr,
-            import_names_attr,
-            repository_url=self.external_packages[package_name].get("repository_url", ""),
-            **classification,
-        )
-        self.import_to_node[package_name] = node_id_to_add
+        self._ensure_external_package_node(G, dist_node)
+        self.import_to_node[package_name] = dist_node
 
     def _ensure_unknown_or_stdlib_node_if_missing(self, G, package_name, dist_node, dist_node_for_edge, ecosystem):
         """
@@ -542,7 +551,10 @@ class DependencyGraphBuilder:
         """
         Add file -> imports_package -> package edge using internal constants
         """
-        edge_attrs = {"ident": package_name}
+        edge_attrs = {
+            "ident": package_name,
+            "scope": G.nodes[file_path].get("scope", classify_path_scope(file_path)),
+        }
         if package_name in self._ambiguous_choices:
             edge_attrs["ambiguity_resolution"] = "lexicographic"
         self._add_edge(
@@ -577,6 +589,9 @@ class DependencyGraphBuilder:
                         f"Skipping unknown package '{pkg_name}' " f"(not found in import_to_node or external_packages)"
                     )
                 return None, None, None
+
+        if not G.has_node(dist_node) and dist_node in self.external_packages:
+            self._ensure_external_package_node(G, dist_node)
 
         dist = dist_node
         ecosystem = "unknown"
@@ -650,6 +665,8 @@ class DependencyGraphBuilder:
                 runtime=parent_attrs.get("runtime"),
                 repository_url=parent_attrs.get("repository_url", ""),
                 url_resolution_status=parent_attrs.get("url_resolution_status", "not-applicable"),
+                manifest_scopes=parent_attrs.get("manifest_scopes", []),
+                manifest_evidence_scopes=parent_attrs.get("manifest_evidence_scopes", []),
             )
             self.object_nodes.add(component_node_id)
             if G.has_node(dist_node_for_contains):
@@ -677,6 +694,7 @@ class DependencyGraphBuilder:
                 self.EDGE_T_USES_COMPONENT,
                 self.EDGE_W_USES_COMPONENT,
                 ident=component_ident,
+                scope=G.nodes[file_path].get("scope", classify_path_scope(file_path)),
             )
             if self.logger:
                 self.logger.debug(f"Added file-to-component edge: {file_path} -> {component_node_id}")
@@ -776,7 +794,7 @@ class DependencyGraphBuilder:
                     dist_node_for_edge = self._normalize_node_fs_target(dist_node)
 
                 if not G.has_node(dist_node_for_edge):
-                    if package_name in self.external_packages:
+                    if dist_node in self.external_packages:
                         self._ensure_external_package_node_if_missing(G, package_name, dist_node)
                     else:
                         dist_node_for_edge = self._ensure_unknown_or_stdlib_node_if_missing(
@@ -784,9 +802,10 @@ class DependencyGraphBuilder:
                         )
 
                 self._add_imports_package_edge(G, file_path, dist_node_for_edge, package_name)
-                self.logger.debug(
-                    f"Added imports_package edge: {file_path} -> {dist_node_for_edge} (import: {package_name})"
-                )
+                if self.logger:
+                    self.logger.debug(
+                        f"Added imports_package edge: {file_path} -> {dist_node_for_edge} (import: {package_name})"
+                    )
 
     def _ensure_file_node_if_missing(self, G, rel_path, importing_file):
         """
@@ -796,9 +815,8 @@ class DependencyGraphBuilder:
         """
         if not G.has_node(rel_path):
             if rel_path in self.source_files:
-                lang_result = filename_to_lang(rel_path)
-                language = lang_result if lang_result else "unknown"
-                G.add_node(rel_path, type="file", language=language)
+                language, scope = self._source_file_language_and_scope(rel_path, self.source_files[rel_path])
+                G.add_node(rel_path, type="file", language=language, scope=scope)
                 if self.logger:
                     self.logger.info(
                         f"Locally imported file '{rel_path}' (from '{importing_file}') not found in graph. Adding it now."  # noqa
@@ -821,6 +839,7 @@ class DependencyGraphBuilder:
             imported_file,
             self.EDGE_T_IMPORTS_LOCAL,
             self.EDGE_W_IMPORTS_LOCAL,
+            scope=G.nodes[importing_file].get("scope", classify_path_scope(importing_file)),
         )
         if self.logger:
             self.logger.debug(f"Added local import edge: {importing_file} -> {imported_file}")
@@ -853,6 +872,95 @@ class DependencyGraphBuilder:
 
         if self.logger:
             self.logger.debug(f"Added {added_edges} local import edges")
+
+    def get_dependency_scope_evidence(self, distribution_name):
+        """
+        Return scope evidence for a dependency distribution
+        """
+        empty_evidence = {"direct_imports": [], "transitive_files": [], "manifests": []}
+        if not self.graph:
+            return empty_evidence
+
+        target_nodes = self._dependency_target_nodes(distribution_name)
+        if not target_nodes:
+            package_data = self.external_packages.get(distribution_name, {})
+            return {
+                **empty_evidence,
+                "manifests": sort_scopes(package_data.get("manifest_evidence_scopes", [])),
+            }
+
+        direct_imports = set()
+        transitive_files = set()
+        for target_node in target_nodes:
+            for predecessor in self.graph.predecessors(target_node):
+                edge_data = self.graph.get_edge_data(predecessor, target_node) or {}
+                if edge_data.get("type") in {self.EDGE_T_IMPORTS_PACKAGE, self.EDGE_T_USES_COMPONENT}:
+                    if self.graph.nodes[predecessor].get("type") == "file":
+                        direct_imports.add(edge_data.get("scope") or self.graph.nodes[predecessor].get("scope"))
+
+            transitive_files.update(self._collect_transitive_file_scopes(target_node, distribution_name))
+
+        manifest_scopes = set()
+        for target_node in target_nodes:
+            attrs = self.graph.nodes[target_node]
+            if attrs.get("type") == "package":
+                manifest_scopes.update(attrs.get("manifest_evidence_scopes", []))
+        if not manifest_scopes:
+            package_data = self.external_packages.get(distribution_name, {})
+            manifest_scopes.update(package_data.get("manifest_evidence_scopes", []))
+
+        return {
+            "direct_imports": sort_scopes(scope for scope in direct_imports if scope),
+            "transitive_files": sort_scopes(scope for scope in transitive_files if scope),
+            "manifests": sort_scopes(scope for scope in manifest_scopes if scope),
+        }
+
+    def _dependency_target_nodes(self, distribution_name):
+        nodes = []
+        for node_id, attrs in self.graph.nodes(data=True):
+            if attrs.get("type") in {"package", "package_component"}:
+                if attrs.get("distribution_name", attrs.get("package", node_id)) == distribution_name:
+                    nodes.append(node_id)
+        return nodes
+
+    def _collect_transitive_file_scopes(self, target_node, distribution_name):
+        scopes = set()
+        visited = set()
+        stack = [target_node]
+
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+
+            current_attrs = self.graph.nodes[current]
+            for predecessor in self.graph.predecessors(current):
+                edge_data = self.graph.get_edge_data(predecessor, current) or {}
+                edge_type = edge_data.get("type")
+                predecessor_attrs = self.graph.nodes[predecessor]
+
+                if predecessor_attrs.get("type") == "file":
+                    if edge_type in {
+                        self.EDGE_T_IMPORTS_PACKAGE,
+                        self.EDGE_T_USES_COMPONENT,
+                        self.EDGE_T_IMPORTS_LOCAL,
+                    }:
+                        scope = predecessor_attrs.get("scope") or edge_data.get("scope")
+                        if scope:
+                            scopes.add(scope)
+                        stack.append(predecessor)
+                    continue
+
+                if edge_type == self.EDGE_T_CONTAINS_COMPONENT:
+                    same_distribution = (
+                        predecessor_attrs.get("distribution_name", predecessor) == distribution_name
+                        and current_attrs.get("distribution_name", current_attrs.get("package")) == distribution_name
+                    )
+                    if same_distribution:
+                        stack.append(predecessor)
+
+        return scopes
 
     def get_graph_data(self):
         """

@@ -14,6 +14,7 @@ from celery import Task
 
 from gardener.analysis.evidence import build_repository_metadata
 from gardener.analysis.main import DependencyAnalyzer
+from gardener.analysis.scopes import ScopeFilter
 from gardener.common.subprocess import SecureSubprocess, SubprocessSecurityError
 from gardener.common.utils import get_logger
 from gardener.package_metadata.url_resolver import resolve_package_url_receipts
@@ -306,6 +307,7 @@ def analyze_repo_task(job_id, drip_list_max_length=200, force_url_refresh=False)
                     "visualize": None,
                     "machine_summary": False,
                     "config_overrides": {},
+                    "scope": ScopeFilter.all().to_metadata(),
                 }
                 analyzer = DependencyAnalyzer(
                     verbose=True,
