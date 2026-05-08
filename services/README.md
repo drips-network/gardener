@@ -137,9 +137,9 @@ Ensure to create the bucket once via `mc` or `aws`.
 
 ## Analysis artifacts and API boundary
 
-Worker-generated `results.json` artifacts include the core analyzer's dependency classification, provenance metadata, and URL-resolution receipts: `schema_version`, `producer`, `repository` (with `canonical_url` and `commit_sha`), `invocation`, `external_packages[*].repository_url_resolution`, dependency classification fields on `top_dependencies`, and package-manager URL-resolution receipts on top dependencies.
+Worker-generated `results.json` artifacts include the core analyzer's dependency classification, provenance metadata, scope evidence, and URL-resolution receipts: `schema_version`, `producer`, `repository` (with `canonical_url` and `commit_sha`), `invocation`, `external_packages[*].repository_url_resolution`, dependency classification fields on `top_dependencies`, `top_dependencies[*].evidence_scopes`, and package-manager URL-resolution receipts on top dependencies.
 
-The latest-results API returns Drip List rows (`package_name`, `package_url`, `split_percentage`). Consumers that need classification, provenance, or URL-resolution evidence should read the stored `results.json` artifact directly. URL-resolution receipts report `status`, `source`, `cache`, `normalized`, `checked_at`, and unresolved `reason`; the URL cache stores successful resolved URLs and receipts expose whether a run used a cache `hit`, `miss`, or `not-used` lookup.
+The latest-results API returns Drip List rows (`package_name`, `package_url`, `split_percentage`). Consumers that need classification, provenance, scope evidence, or URL-resolution evidence should read the stored `results.json` artifact directly. Scope evidence uses deterministic path heuristics (`path-heuristic-v1`) across `production`, `tests`, `fixtures`, `examples`, `docs`, `scripts`, and `unknown`. URL-resolution receipts report `status`, `source`, `cache`, `normalized`, `checked_at`, and unresolved `reason`; the URL cache stores successful resolved URLs and receipts expose whether a run used a cache `hit`, `miss`, or `not-used` lookup.
 
 ## API endpoints
 

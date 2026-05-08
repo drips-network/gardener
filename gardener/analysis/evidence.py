@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from importlib import metadata
 from urllib.parse import urlsplit, urlunsplit
 
+from gardener.analysis.scopes import ScopeFilter
 from gardener.common.defaults import GraphAnalysisConfig
 from gardener.package_metadata.url_resolution import (
     URL_RESOLUTION_STATUS_NOT_APPLICABLE as URL_RESOLUTION_NOT_APPLICABLE,
@@ -36,6 +37,7 @@ _INVOCATION_KEYS = (
     "visualize",
     "machine_summary",
     "config_overrides",
+    "scope",
 )
 
 _NODE_CORE_MODULES = frozenset(
@@ -128,6 +130,7 @@ def complete_invocation_metadata(invocation_metadata: dict | None) -> dict:
         invocation.get("centrality_metric") or GraphAnalysisConfig.CENTRALITY_METRIC.lower()
     )
     complete["config_overrides"] = dict(invocation.get("config_overrides") or {})
+    complete["scope"] = dict(invocation.get("scope") or ScopeFilter.all().to_metadata())
     return complete
 
 
@@ -479,7 +482,7 @@ def _project_summary_dependency(dependency: dict, index: int, centrality_metric:
         else:
             url_resolution = infer_repository_url_resolution_from_existing_url(dependency["package_url"])
 
-    return {
+    summary_dependency = {
         "name": dependency["package_name"],
         "kind": dependency["dependency_kind"],
         "ecosystem": dependency["ecosystem"],
@@ -494,3 +497,6 @@ def _project_summary_dependency(dependency: dict, index: int, centrality_metric:
         },
         "evidence_ref": f"top_dependencies[{index}]",
     }
+    if "evidence_scopes" in dependency:
+        summary_dependency["evidence_scopes"] = dict(dependency["evidence_scopes"])
+    return summary_dependency

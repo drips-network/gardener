@@ -51,12 +51,14 @@ python -m gardener.main_cli https://github.com/owner/repo
 * `-l, --languages LANGS` - Languages to focus the analysis on (comma-separated)
 * `-c, --config JSON` - Configuration overrides
 * `--machine-summary` - Also write `output/<prefix>_dependency_summary.json`, a compact machine-readable summary
+* `--scope SCOPES` - Analyze only comma-separated path scopes such as `production`, `tests`, or `fixtures`; `all` includes every scope
+* `--exclude-scope SCOPES` - Exclude comma-separated path scopes from analysis
 * `--visualize` - Generate interactive graph visualization (requires '[.viz]' extra)
 
 **Outputs**:
 * In-console results summary
-* `output/<prefix>_dependency_analysis.json` — full analysis result with graph data, provenance, dependency classification, URL-resolution receipts, and centrality scores
-* `output/<prefix>_dependency_summary.json` — only when `--machine-summary` is used; a compact projection of the full result for programmatic consumers, including URL-resolution evidence for package-manager dependencies
+* `output/<prefix>_dependency_analysis.json` — full analysis result with graph data, provenance, dependency classification, scope evidence, URL-resolution receipts, and centrality scores
+* `output/<prefix>_dependency_summary.json` — only when `--machine-summary` is used; a compact projection of the full result for programmatic consumers, including scope evidence and URL-resolution evidence for package-manager dependencies
 * `output/<prefix>_dependency_graph.html` (if '--visualize' is used and '.[viz]' is installed)
 
 Each dependency is classified by kind: `package-manager`, `builtin` (runtime/platform modules like `fs` or `os`), `local`, or `unknown`. Builtins can rank highly because source files import them frequently; their classification helps consumers distinguish runtime reliance from third-party packages.

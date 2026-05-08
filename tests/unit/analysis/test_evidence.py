@@ -55,6 +55,13 @@ def test_schema_and_provenance_metadata_contract(monkeypatch):
         "visualize": None,
         "machine_summary": True,
         "config_overrides": {},
+        "scope": {
+            "mode": "all",
+            "include": None,
+            "exclude": [],
+            "active": ["production", "tests", "fixtures", "examples", "docs", "scripts", "unknown"],
+            "classifier": "path-heuristic-v1",
+        },
     }
     assert build_repository_metadata(
         input_value="https://github.com/example/repo",
@@ -478,6 +485,11 @@ def test_machine_summary_projects_enriched_analysis_result_in_dependency_order()
                     "normalized": True,
                     "checked_at": "2026-05-08T12:00:00Z",
                 },
+                "evidence_scopes": {
+                    "direct_imports": ["production"],
+                    "transitive_files": ["production", "tests"],
+                    "manifests": ["production"],
+                },
             },
             {
                 "package_name": "fs",
@@ -527,6 +539,11 @@ def test_machine_summary_projects_enriched_analysis_result_in_dependency_order()
             },
             "centrality": {"metric": "pagerank", "percentage": 80.0, "score": 0.08},
             "evidence_ref": "top_dependencies[0]",
+            "evidence_scopes": {
+                "direct_imports": ["production"],
+                "transitive_files": ["production", "tests"],
+                "manifests": ["production"],
+            },
         },
         {
             "name": "fs",

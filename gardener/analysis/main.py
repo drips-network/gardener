@@ -14,6 +14,7 @@ from gardener.analysis.evidence import (
     enrich_analysis_result,
 )
 from gardener.analysis.graph import DependencyGraphBuilder
+from gardener.analysis.scopes import ScopeFilter
 from gardener.analysis.tree import RepositoryAnalyzer
 from gardener.common.defaults import ConfigOverride, GraphAnalysisConfig as cfg, apply_config_overrides
 from gardener.common.utils import Logger, get_repo
@@ -35,17 +36,19 @@ class DependencyAnalyzer:
     This class is persistence-agnostic and returns pure data structures
     """
 
-    def __init__(self, verbose=False, *, repository_metadata=None, invocation_metadata=None):
+    def __init__(self, verbose=False, *, repository_metadata=None, invocation_metadata=None, scope_filter=None):
         """
         Args:
             verbose (bool): Enable verbose logging
             repository_metadata (dict | None): Repository provenance metadata
             invocation_metadata (dict | None): Invocation provenance metadata
+            scope_filter (ScopeFilter | None): Scope filter controlling active evidence inputs
         """
         self.verbose = verbose
         self.logger = Logger(verbose=verbose)
         self.repository_metadata = repository_metadata
         self.invocation_metadata = invocation_metadata
+        self.scope_filter = scope_filter or ScopeFilter.all()
 
         # Initialize components that persist across analysis phases
         self.repo_analyzer = None
@@ -88,7 +91,12 @@ class DependencyAnalyzer:
         Returns:
             Dictionary of external packages found
         """
-        self.repo_analyzer = RepositoryAnalyzer(repo_path, specific_languages, self.logger)
+        self.repo_analyzer = RepositoryAnalyzer(
+            repo_path,
+            specific_languages,
+            self.logger,
+            scope_filter=self.scope_filter,
+        )
         self._register_language_handlers()
         return self._scan_and_process_manifests()
 
@@ -190,6 +198,7 @@ class DependencyAnalyzer:
                 "package_url": repository_url,
                 "ecosystem": ecosystem,
                 **classification,
+                "evidence_scopes": self.graph_builder.get_dependency_scope_evidence(package_name),
             }
             if isinstance(repository_url_resolution, dict):
                 dependency["repository_url_resolution"] = repository_url_resolution
@@ -203,6 +212,10 @@ class DependencyAnalyzer:
         Returns:
             Dict with keys: external_packages, dependency_graph, top_dependencies, analyzer_details
         """
+        invocation_metadata = dict(self.invocation_metadata or {})
+        if not invocation_metadata.get("scope"):
+            invocation_metadata["scope"] = self.scope_filter.to_metadata()
+
         results = {
             "external_packages": self.repo_analyzer.external_packages,
             "dependency_graph": self.graph_builder.get_graph_data() if graph else {},
@@ -211,6 +224,13 @@ class DependencyAnalyzer:
                 "local_imports_map": self.repo_analyzer.local_imports_map,
                 "file_imports": self.repo_analyzer.file_imports,
                 "file_package_components": self.repo_analyzer.file_package_components,
+                "scope_summary": getattr(self.repo_analyzer, "scope_summary", {}),
+                "file_scopes": {
+                    rel_path: file_info.get("scope")
+                    for rel_path, file_info in self.repo_analyzer.source_files.items()
+                    if isinstance(file_info, dict) and file_info.get("scope")
+                },
+                "excluded_local_imports_map": getattr(self.repo_analyzer, "excluded_local_imports_map", {}),
                 "total_files": len(self.repo_analyzer.source_files),
                 "languages_detected": (
                     list(
@@ -227,7 +247,7 @@ class DependencyAnalyzer:
         return enrich_analysis_result(
             results,
             repository_metadata=self.repository_metadata,
-            invocation_metadata=self.invocation_metadata,
+            invocation_metadata=invocation_metadata,
         )
 
     def analyze_dependencies(self, external_packages_with_urls, *, repository_metadata=None, invocation_metadata=None):
@@ -303,6 +323,7 @@ class DependencyAnalyzer:
         *,
         repository_metadata=None,
         invocation_metadata=None,
+        scope_filter=None,
     ):
         """
         Analyze a repository and return the results as a data structure
@@ -323,6 +344,9 @@ class DependencyAnalyzer:
                 - top_dependencies: List of top dependencies with percentages
                 - analyzer_details: Additional analysis metadata
         """
+        if scope_filter is not None:
+            self.scope_filter = scope_filter
+
         # Step 1: Discover packages from manifests
         external_packages = self.discover_packages(repo_path, specific_languages)
 
@@ -346,6 +370,7 @@ def analyze_repository(
     *,
     repository_metadata=None,
     invocation_metadata=None,
+    scope_filter=None,
 ):
     """
     Convenience function to analyze a repository
@@ -367,6 +392,7 @@ def analyze_repository(
         verbose=verbose,
         repository_metadata=repository_metadata,
         invocation_metadata=invocation_metadata,
+        scope_filter=scope_filter,
     )
     # Prefer scoped overrides when provided to avoid global mutation during tests
     if overrides:
@@ -377,6 +403,7 @@ def analyze_repository(
                 url_cache=url_cache,
                 repository_metadata=repository_metadata,
                 invocation_metadata=invocation_metadata,
+                scope_filter=scope_filter,
             )
     return analyzer.analyze(
         repo_path,
@@ -384,6 +411,7 @@ def analyze_repository(
         url_cache=url_cache,
         repository_metadata=repository_metadata,
         invocation_metadata=invocation_metadata,
+        scope_filter=scope_filter,
     )
 
 
@@ -607,6 +635,7 @@ def run_analysis(
     config_overrides=None,
     persistence=None,
     machine_summary=False,
+    scope_filter=None,
 ):
     """
     Run the full dependency analysis with the specified persistence backend
@@ -625,6 +654,7 @@ def run_analysis(
         Dict of analysis results
     """
     logger = Logger(verbose=verbose)
+    scope_filter = scope_filter or ScopeFilter.all()
 
     # Use default file persistence if none provided
     if persistence is None:
@@ -649,6 +679,7 @@ def run_analysis(
             "visualize": not minimal_outputs,
             "machine_summary": machine_summary,
             "config_overrides": config_overrides or {},
+            "scope": scope_filter.to_metadata(),
         }
         # Use scoped overrides for the run to avoid global state bleed-through
         results = analyze_repository(
@@ -658,6 +689,7 @@ def run_analysis(
             overrides=config_overrides,
             repository_metadata=repository_metadata,
             invocation_metadata=invocation_metadata,
+            scope_filter=scope_filter,
         )
 
         output_prefix = _determine_output_prefix(abs_path, output_prefix)

@@ -31,6 +31,7 @@ See [README: Quick Start](../README.md#quick-start) for installation and basic u
 
 1. **Repository scanning** with secure file operations
    - Identifies source files and manifests
+   - Annotates source files and manifest occurrences with path-based scopes
    - Respects `.gitignore` patterns
    - Detects language from file extensions
    - Parses `.gitmodules`: if a repo's dependency is vendored via git submodule, Gardener prioritizes the submodule's canonical URL from `.gitmodules`.
@@ -63,16 +64,18 @@ See [README: Quick Start](../README.md#quick-start) for installation and basic u
    - Normalizes the final set to percentages summing to 100% (as needed for the [Drip Lists](https://docs.drips.network/support-your-dependencies/overview/) application)
 6. **Graph serialization and reporting**
    - [README: CLI](../README.md#cli-for-local-analysis) for output types
-   - The full JSON result includes graph data, dependency classification metadata, and repository URL-resolution receipts; the optional machine summary is derived from the full result
+   - The full JSON result includes graph data, dependency classification metadata, scope evidence, and repository URL-resolution receipts; the optional machine summary is derived from the full result
    - Optionally, a HTML file with an interactive graph visualization can be produced (if `ipysigma` is installed (`.[viz]`)).  Here is an example, from Gardener's analysis of [github.com/keras-team/keras/](https://github.com/keras-team/keras/)):
 
 ![Keras import graph visualization](visualization/visualization-demo.gif)
 
 ## Outputs and evidence metadata
 
-`output/<prefix>_dependency_analysis.json` is the canonical full analysis output. It contains `external_packages`, `dependency_graph`, `top_dependencies`, and `analyzer_details`, plus top-level provenance fields (`schema_version`, `producer`, `repository`, `invocation`, `created_at`). Graph nodes, external package entries, and top dependencies include classification fields such as `dependency_kind`, `runtime`, `normalized_name`, `url_resolution_status`, and raw centrality `score`. External package entries also include `repository_url_resolution`, a receipt with `status`, `source`, `cache`, `normalized`, `checked_at`, and an unresolved `reason` when applicable.
+`output/<prefix>_dependency_analysis.json` is the canonical full analysis output. It contains `external_packages`, `dependency_graph`, `top_dependencies`, and `analyzer_details`, plus top-level provenance fields (`schema_version`, `producer`, `repository`, `invocation`, `created_at`). Graph file nodes and file-originated edges include path-based `scope` values. External package entries include `manifest_evidence`, `manifest_scopes`, and `manifest_evidence_scopes`. Top dependencies include classification fields such as `dependency_kind`, `runtime`, `normalized_name`, `url_resolution_status`, raw centrality `score`, and `evidence_scopes` with `direct_imports`, `transitive_files`, and `manifests` lists. External package entries also include `repository_url_resolution`, a receipt with `status`, `source`, `cache`, `normalized`, `checked_at`, and an unresolved `reason` when applicable.
 
-`--machine-summary` writes `output/<prefix>_dependency_summary.json` alongside the full JSON. The summary is a compact projection for programmatic consumers: schema/provenance metadata, graph counts and digest, detected languages, and the ranked `top_dependencies` list. Package-manager dependencies include their full URL-resolution receipt in `url_resolution`; builtin, local, and unknown dependencies use the compact status shape. Each dependency is classified by kind: `package-manager`, `builtin` (runtime/platform modules like `fs` or `os`), `local`, or `unknown`. Builtins can rank highly because source files import them frequently; their classification helps consumers distinguish runtime reliance from third-party packages.
+`--machine-summary` writes `output/<prefix>_dependency_summary.json` alongside the full JSON. The summary is a compact projection for programmatic consumers: schema/provenance metadata, graph counts and digest, detected languages, and the ranked `top_dependencies` list with dependency scope evidence. Package-manager dependencies include their full URL-resolution receipt in `url_resolution`; builtin, local, and unknown dependencies use the compact status shape. Each dependency is classified by kind: `package-manager`, `builtin` (runtime/platform modules like `fs` or `os`), `local`, or `unknown`. Builtins can rank highly because source files import them frequently; their classification helps consumers distinguish runtime reliance from third-party packages.
+
+Scopes are deterministic path heuristics identified by classifier `path-heuristic-v1`: `production`, `tests`, `fixtures`, `examples`, `docs`, `scripts`, and `unknown`. Default CLI analysis includes all scopes. Use `--scope production,tests` to include selected scopes, `--scope all` to include every scope explicitly, or `--exclude-scope fixtures,examples` to remove selected scopes from active graph evidence. Manifests are always available as package catalog and resolver inputs; their `manifest_evidence_scopes` field identifies which manifest declarations are active evidence for the selected scope filter.
 
 URL-resolution `source` values identify where the evidence came from, such as `cache`, `gitmodules`, `npm-registry`, `pypi-registry`, `crates-io`, `go-import-path`, `go-get-meta`, `solidity-source-hint`, `static-rule`, `provided`, or `not-recorded`. Cache values are `hit`, `miss`, or `not-used`. Unresolved reasons include registry/no-data conditions, validation rejection, normalization failure, unsupported ecosystems, resolver errors, and externally provided package data without recorded resolution.
 
@@ -84,6 +87,7 @@ gardener/
 │   ├── main.py                  # Analysis entry point and high-level orchestrator
 │   ├── tree.py                  # RepositoryAnalyzer orchestrator (delegates to helpers)
 │   ├── scanner.py               # Secure repo scan, .gitignore, foundry src, .gitmodules
+│   ├── scopes.py                # Path-based scope classification and filtering
 │   ├── manifests.py             # Manifest processing, dedup, conflicts, import-name attach
 │   ├── js_ts_aliases.py         # tsconfig/jsconfig parsing and alias resolver creation
 │   ├── imports.py               # LocalImportResolver and import extraction loop

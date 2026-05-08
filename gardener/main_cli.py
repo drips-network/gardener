@@ -11,6 +11,7 @@ import json
 import sys
 
 from gardener.analysis.main import run_analysis
+from gardener.analysis.scopes import parse_scope_filter
 from gardener.common.utils import Logger, RepositoryError
 
 
@@ -48,7 +49,14 @@ def main():
         action="store_true",
         help="Write a compact machine-consumable dependency summary sidecar",
     )
+    parser.add_argument("--scope", help="Comma-separated scopes to include, or all")
+    parser.add_argument("--exclude-scope", help="Comma-separated scopes to exclude")
     args = parser.parse_args()
+
+    try:
+        scope_filter = parse_scope_filter(args.scope, args.exclude_scope)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     config_overrides = None
     if args.config:
@@ -79,6 +87,7 @@ def main():
             args.languages,
             config_overrides,
             machine_summary=args.machine_summary,
+            scope_filter=scope_filter,
         )
     except RepositoryError as e:
         logger.error(str(e))
