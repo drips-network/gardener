@@ -14,7 +14,8 @@ This is a **static dependency analysis** tool that builds import graphs from any
 * **Resolves external dependencies' repository URLs** (npm, PyPI, crates.io, Go proxy, Git submodules, GitHub/GitLab/Bitbucket normalization)
 * **Produces**:
   * Recommended **Drip Lists** with normalized percentages, aggregated per external dependency's canonical repository URL
-  * JSON exports with **complete node-link graphs**
+  * JSON exports with complete node-link graphs, provenance metadata, and dependency classification
+  * Optional compact machine-readable summaries
   * Optional **interactive graph visualizations**
 * Runs as a **CLI** (analyze any local path or remote Git URL) or as a **microservice** (FastAPI + Celery + Redis + PostgreSQL)
 
@@ -49,12 +50,16 @@ python -m gardener.main_cli https://github.com/owner/repo
 * `-v, --verbose` - Enable debug logging
 * `-l, --languages LANGS` - Languages to focus the analysis on (comma-separated)
 * `-c, --config JSON` - Configuration overrides
+* `--machine-summary` - Also write `output/<prefix>_dependency_summary.json`, a compact machine-readable summary
 * `--visualize` - Generate interactive graph visualization (requires '[.viz]' extra)
 
 **Outputs**:
 * In-console results summary
-* `output/<prefix>_dependency_analysis.json`
+* `output/<prefix>_dependency_analysis.json` — full analysis result with graph data, provenance, dependency classification, and centrality scores
+* `output/<prefix>_dependency_summary.json` — only when `--machine-summary` is used; a compact projection of the full result for programmatic consumers
 * `output/<prefix>_dependency_graph.html` (if '--visualize' is used and '.[viz]' is installed)
+
+Each dependency is classified by kind: `package-manager`, `builtin` (runtime/platform modules like `fs` or `os`), `local`, or `unknown`. Builtins can rank highly because source files import them frequently; their classification helps consumers distinguish runtime reliance from third-party packages.
 
 ### Microservice
 

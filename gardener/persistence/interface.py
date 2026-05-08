@@ -25,6 +25,17 @@ class PersistenceInterface(ABC):
         pass
 
     @abstractmethod
+    def save_machine_summary(self, summary, identifier):
+        """
+        Save the compact machine summary JSON data
+
+        Args:
+            summary (dict): Machine summary dictionary
+            identifier (str): Unique identifier for this analysis
+        """
+        pass
+
+    @abstractmethod
     def save_graph_visualization(self, graph_html, identifier):
         """
         Save the interactive graph visualization

@@ -43,6 +43,11 @@ def main():
         "-l", "--languages", help="Comma-separated list of languages to focus on (e.g., python,javascript)"
     )
     parser.add_argument("-c", "--config", help="JSON string with configuration overrides")
+    parser.add_argument(
+        "--machine-summary",
+        action="store_true",
+        help="Write a compact machine-consumable dependency summary sidecar",
+    )
     args = parser.parse_args()
 
     config_overrides = None
@@ -66,7 +71,15 @@ def main():
         elif args.minimal_outputs:
             minimal_outputs = True
 
-        run_analysis(args.repo_path, args.output, args.verbose, minimal_outputs, args.languages, config_overrides)
+        run_analysis(
+            args.repo_path,
+            args.output,
+            args.verbose,
+            minimal_outputs,
+            args.languages,
+            config_overrides,
+            machine_summary=args.machine_summary,
+        )
     except RepositoryError as e:
         logger.error(str(e))
         sys.exit(1)

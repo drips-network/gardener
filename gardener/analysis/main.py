@@ -7,6 +7,12 @@ import os
 import networkx as nx
 
 from gardener.analysis.centrality import CentralityCalculator
+from gardener.analysis.evidence import (
+    build_machine_summary,
+    build_repository_metadata,
+    classify_dependency_fact,
+    enrich_analysis_result,
+)
 from gardener.analysis.graph import DependencyGraphBuilder
 from gardener.analysis.tree import RepositoryAnalyzer
 from gardener.common.defaults import ConfigOverride, GraphAnalysisConfig as cfg, apply_config_overrides
@@ -28,13 +34,17 @@ class DependencyAnalyzer:
     This class is persistence-agnostic and returns pure data structures
     """
 
-    def __init__(self, verbose=False):
+    def __init__(self, verbose=False, *, repository_metadata=None, invocation_metadata=None):
         """
         Args:
             verbose (bool): Enable verbose logging
+            repository_metadata (dict | None): Repository provenance metadata
+            invocation_metadata (dict | None): Invocation provenance metadata
         """
         self.verbose = verbose
         self.logger = Logger(verbose=verbose)
+        self.repository_metadata = repository_metadata
+        self.invocation_metadata = invocation_metadata
 
         # Initialize components that persist across analysis phases
         self.repo_analyzer = None
@@ -130,13 +140,13 @@ class DependencyAnalyzer:
 
     def _normalize_top_dependencies(self, top_deps_tuples):
         """
-        Convert top dependency tuples into enriched dicts with percentages and URLs
+        Convert top dependency tuples into enriched dicts with percentages, scores, URLs, and evidence metadata
 
         Args:
             top_deps_tuples: List of (package_name, score)
 
         Returns:
-            List[dict] with keys: package_name, percentage, package_url, ecosystem
+            List[dict] with dependency ranking and evidence metadata
         """
         top_deps = []
         total_score = sum(score for _, score in top_deps_tuples)
@@ -144,16 +154,38 @@ class DependencyAnalyzer:
             percentage = (score / total_score * 100) if total_score > 0 else 0
             repository_url = ""
             ecosystem = "unknown"
+
             if package_name in self.repo_analyzer.external_packages:
-                repository_url = self.repo_analyzer.external_packages[package_name].get("repository_url", "")
-                ecosystem = self.repo_analyzer.external_packages[package_name].get("ecosystem", "unknown")
+                package_data = self.repo_analyzer.external_packages[package_name]
+                repository_url = package_data.get("repository_url", "")
+                ecosystem = package_data.get("ecosystem", "unknown")
+                classification = classify_dependency_fact(
+                    package_name,
+                    ecosystem=ecosystem,
+                    is_package_manager=True,
+                    repository_url=repository_url,
+                )
+            elif self.graph_builder.graph and self.graph_builder.graph.has_node(package_name):
+                graph_node = self.graph_builder.graph.nodes[package_name]
+                repository_url = graph_node.get("repository_url", "")
+                ecosystem = graph_node.get("ecosystem", "unknown")
+                classification = {
+                    "dependency_kind": graph_node.get("dependency_kind"),
+                    "runtime": graph_node.get("runtime"),
+                    "normalized_name": graph_node.get("normalized_name"),
+                    "url_resolution_status": graph_node.get("url_resolution_status"),
+                }
+            else:
+                classification = classify_dependency_fact(package_name, ecosystem=ecosystem)
 
             top_deps.append(
                 {
                     "package_name": package_name,
                     "percentage": percentage,
+                    "score": score,
                     "package_url": repository_url,
                     "ecosystem": ecosystem,
+                    **classification,
                 }
             )
         return top_deps
@@ -186,18 +218,28 @@ class DependencyAnalyzer:
                 ),
             },
         }
-        return results
+        return enrich_analysis_result(
+            results,
+            repository_metadata=self.repository_metadata,
+            invocation_metadata=self.invocation_metadata,
+        )
 
-    def analyze_dependencies(self, external_packages_with_urls):
+    def analyze_dependencies(self, external_packages_with_urls, *, repository_metadata=None, invocation_metadata=None):
         """
         Analyze dependencies after URLs have been resolved for external packages
 
         Args:
             external_packages_with_urls (dict): The external packages dict, now with 'repository_url' populated
+            repository_metadata (dict | None): Repository provenance metadata override
+            invocation_metadata (dict | None): Invocation provenance metadata override
 
         Returns:
             The final analysis results dictionary
         """
+        if repository_metadata is not None:
+            self.repository_metadata = repository_metadata
+        if invocation_metadata is not None:
+            self.invocation_metadata = invocation_metadata
         if not self.repo_analyzer:
             raise RuntimeError("discover_packages must be called before analyze_dependencies")
 
@@ -247,7 +289,15 @@ class DependencyAnalyzer:
                 external_packages[package_name].setdefault("repository_url", "")
         return external_packages
 
-    def analyze(self, repo_path, specific_languages=None, url_cache=None):
+    def analyze(
+        self,
+        repo_path,
+        specific_languages=None,
+        url_cache=None,
+        *,
+        repository_metadata=None,
+        invocation_metadata=None,
+    ):
         """
         Analyze a repository and return the results as a data structure
 
@@ -257,6 +307,8 @@ class DependencyAnalyzer:
             repo_path (str): Path to the repository to analyze
             specific_languages (list): Optional list of languages to analyze
             url_cache (dict): Optional pre-populated cache for package URLs
+            repository_metadata (dict | None): Repository provenance metadata override
+            invocation_metadata (dict | None): Invocation provenance metadata override
 
         Returns:
             Dictionary containing:
@@ -272,10 +324,23 @@ class DependencyAnalyzer:
         external_packages = self._resolve_repository_urls(external_packages, url_cache)
 
         # Step 3: Analyze dependencies with resolved URLs
-        return self.analyze_dependencies(external_packages)
+        return self.analyze_dependencies(
+            external_packages,
+            repository_metadata=repository_metadata,
+            invocation_metadata=invocation_metadata,
+        )
 
 
-def analyze_repository(repo_path, specific_languages=None, verbose=False, overrides=None, url_cache=None):
+def analyze_repository(
+    repo_path,
+    specific_languages=None,
+    verbose=False,
+    overrides=None,
+    url_cache=None,
+    *,
+    repository_metadata=None,
+    invocation_metadata=None,
+):
     """
     Convenience function to analyze a repository
 
@@ -286,16 +351,34 @@ def analyze_repository(repo_path, specific_languages=None, verbose=False, overri
         specific_languages (list): Optional list of languages to analyze
         verbose (bool): Enable verbose logging
         url_cache (dict): Optional pre-populated cache for package URLs
+        repository_metadata (dict | None): Repository provenance metadata
+        invocation_metadata (dict | None): Invocation provenance metadata
 
     Returns:
         Dictionary containing analysis results
     """
-    analyzer = DependencyAnalyzer(verbose=verbose)
+    analyzer = DependencyAnalyzer(
+        verbose=verbose,
+        repository_metadata=repository_metadata,
+        invocation_metadata=invocation_metadata,
+    )
     # Prefer scoped overrides when provided to avoid global mutation during tests
     if overrides:
         with ConfigOverride(overrides, logger=analyzer.logger):
-            return analyzer.analyze(repo_path, specific_languages, url_cache=url_cache)
-    return analyzer.analyze(repo_path, specific_languages, url_cache=url_cache)
+            return analyzer.analyze(
+                repo_path,
+                specific_languages,
+                url_cache=url_cache,
+                repository_metadata=repository_metadata,
+                invocation_metadata=invocation_metadata,
+            )
+    return analyzer.analyze(
+        repo_path,
+        specific_languages,
+        url_cache=url_cache,
+        repository_metadata=repository_metadata,
+        invocation_metadata=invocation_metadata,
+    )
 
 
 def save_analysis_results(results, output_prefix, persistence, logger):
@@ -318,6 +401,27 @@ def save_analysis_results(results, output_prefix, persistence, logger):
         return True
     except Exception as e:
         logger.error(f"Error saving analysis results: {str(e)}")
+        return False
+
+
+def save_machine_summary(summary, output_prefix, persistence, logger):
+    """
+    Save machine summary using the provided persistence backend
+
+    Args:
+        summary (dict): Machine summary dictionary
+        output_prefix (str): Prefix for output files
+        persistence (object): Persistence backend to use
+        logger (Logger): Logger instance
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        persistence.save_machine_summary(summary, output_prefix)
+        return True
+    except Exception as e:
+        logger.error(f"Error saving machine summary: {str(e)}")
         return False
 
 
@@ -385,6 +489,13 @@ def _prepare_repository_path(repo_path, logger):
     return abs_path
 
 
+def _is_remote_repository_input(repo_path):
+    """
+    Return whether repo_path is a remote repository input
+    """
+    return str(repo_path).startswith(("http://", "https://", "git@"))
+
+
 def _parse_focus_languages(focus_languages_str, logger):
     """
     Parse comma-separated focus languages into a normalized list or None
@@ -432,9 +543,9 @@ def _determine_output_prefix(abs_path, output_prefix):
     return output_prefix
 
 
-def _persist_and_visualize(results, output_prefix, persistence, logger, minimal_outputs):
+def _persist_and_visualize(results, output_prefix, persistence, logger, minimal_outputs, machine_summary):
     """
-    Save analysis results and generate visualizations (delegates to existing functions)
+    Save analysis results, optional machine summary, and visualizations
 
     Args:
         results (dict): Analysis results
@@ -442,10 +553,17 @@ def _persist_and_visualize(results, output_prefix, persistence, logger, minimal_
         persistence (object): Persistence backend
         logger (Logger): Logger instance
         minimal_outputs (bool): Whether to skip visualizations
+        machine_summary (bool): Whether to persist the compact machine summary sidecar
     """
     save_success = save_analysis_results(results, output_prefix, persistence, logger)
     if not save_success:
         logger.error("Failed to save analysis results")
+
+    if machine_summary:
+        summary = build_machine_summary(results)
+        summary_success = save_machine_summary(summary, output_prefix, persistence, logger)
+        if not summary_success:
+            logger.error("Failed to save machine summary")
 
     viz_success = generate_and_save_visualizations(results, output_prefix, persistence, logger, minimal_outputs)
     if not viz_success:
@@ -482,6 +600,7 @@ def run_analysis(
     focus_languages_str=None,
     config_overrides=None,
     persistence=None,
+    machine_summary=False,
 ):
     """
     Run the full dependency analysis with the specified persistence backend
@@ -494,6 +613,7 @@ def run_analysis(
         focus_languages_str (str): Comma-separated list of languages to focus on
         config_overrides (dict): Optional dictionary of configuration parameter overrides
         persistence (object): Persistence backend to use (defaults to FilePersistence)
+        machine_summary (bool): Whether to persist the compact machine summary sidecar
 
     Returns:
         Dict of analysis results
@@ -505,17 +625,37 @@ def run_analysis(
         persistence = FilePersistence()
 
     try:
+        original_repo_path = repo_path
         abs_path = _prepare_repository_path(repo_path, logger)
         logger.info(f"Analyzing repository: {abs_path}")
 
         focus_languages = _parse_focus_languages(focus_languages_str, logger)
+        repository_metadata = build_repository_metadata(
+            input_value=original_repo_path,
+            resolved_path=None if _is_remote_repository_input(original_repo_path) else abs_path,
+            canonical_url=None,
+            commit_sha=None,
+        )
+        invocation_metadata = {
+            "entrypoint": "cli",
+            "languages": focus_languages,
+            "minimal_outputs": minimal_outputs,
+            "visualize": not minimal_outputs,
+            "machine_summary": machine_summary,
+            "config_overrides": config_overrides or {},
+        }
         # Use scoped overrides for the run to avoid global state bleed-through
         results = analyze_repository(
-            repo_path=abs_path, specific_languages=focus_languages, verbose=verbose, overrides=config_overrides
+            repo_path=abs_path,
+            specific_languages=focus_languages,
+            verbose=verbose,
+            overrides=config_overrides,
+            repository_metadata=repository_metadata,
+            invocation_metadata=invocation_metadata,
         )
 
         output_prefix = _determine_output_prefix(abs_path, output_prefix)
-        _persist_and_visualize(results, output_prefix, persistence, logger, minimal_outputs)
+        _persist_and_visualize(results, output_prefix, persistence, logger, minimal_outputs, machine_summary)
         _report_top_dependencies(results, logger)
         return results
 

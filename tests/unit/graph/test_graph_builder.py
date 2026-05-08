@@ -2,6 +2,12 @@
 Unit tests for the DependencyGraphBuilder
 """
 
+from gardener.analysis.evidence import (
+    DEPENDENCY_KIND_BUILTIN,
+    DEPENDENCY_KIND_PACKAGE_MANAGER,
+    DEPENDENCY_KIND_UNKNOWN,
+)
+
 
 def test_build_graph_only_files_no_imports(graph_builder, logger):
     """
@@ -652,6 +658,95 @@ def test_build_graph_ambiguous_imports_choose_lexicographic(graph_builder, logge
     # A more specific check on which packages were listed in the warning:
     # e.g., assert "'package_alpha'" in logged_message and "'package_beta'" in logged_message
     # and f"Choosing 'package_alpha'" in logged_message
+
+
+def test_package_and_unmanaged_nodes_include_evidence_metadata(graph_builder, logger):
+    """
+    Package and unmanaged dependency nodes carry additive evidence metadata without topology rewrites
+    """
+    source_files = {"main.js": "/path/to/repo/main.js"}
+    external_packages = {
+        "zod": {
+            "ecosystem": "npm",
+            "import_names": ["zod"],
+            "repository_url": "https://github.com/colinhacks/zod",
+        }
+    }
+    file_imports = {"main.js": ["zod", "path", "node:path", "not-a-core-module"]}
+    file_package_components = {"main.js": [("zod", "zod.object")]}
+    local_imports_map = {}
+
+    graph_builder.build_dependency_graph(
+        source_files=source_files,
+        external_packages=external_packages,
+        file_imports=file_imports,
+        file_package_components=file_package_components,
+        local_imports_map=local_imports_map,
+    )
+    graph = graph_builder.graph
+
+    assert graph.number_of_nodes() == 6
+    assert graph.number_of_edges() == 6
+
+    zod_node = graph.nodes["zod"]
+    assert zod_node["dependency_kind"] == DEPENDENCY_KIND_PACKAGE_MANAGER
+    assert zod_node["normalized_name"] == "zod"
+    assert zod_node["repository_url"] == "https://github.com/colinhacks/zod"
+    assert zod_node["url_resolution_status"] == "resolved"
+
+    component_node = graph.nodes["zod.object"]
+    assert component_node["dependency_kind"] == DEPENDENCY_KIND_PACKAGE_MANAGER
+    assert component_node["normalized_name"] == "zod"
+    assert component_node["repository_url"] == "https://github.com/colinhacks/zod"
+
+    for node_id in ("path", "node:path"):
+        node = graph.nodes[node_id]
+        assert node["ecosystem"] == "js_stdlib"
+        assert node["dependency_kind"] == DEPENDENCY_KIND_BUILTIN
+        assert node["runtime"] == "node"
+        assert node["normalized_name"] == "node:path"
+        assert node["url_resolution_status"] == "not-applicable"
+
+    unknown_node = graph.nodes["not-a-core-module"]
+    assert unknown_node["ecosystem"] == "js_stdlib"
+    assert unknown_node["dependency_kind"] == DEPENDENCY_KIND_UNKNOWN
+    assert unknown_node["normalized_name"] == "not-a-core-module"
+
+
+def test_prefix_resolved_package_components_inherit_evidence_metadata(graph_builder, logger):
+    """
+    Components for longest-prefix-resolved imports inherit evidence metadata from the resolved package node
+    """
+    source_files = {"main.go": "/path/to/repo/main.go"}
+    external_packages = {
+        "github.com/acme/pkg": {
+            "ecosystem": "gomod",
+            "import_names": ["github.com/acme/pkg"],
+            "repository_url": "https://github.com/acme/pkg",
+        }
+    }
+    file_imports = {"main.go": ["github.com/acme/pkg/submodule"]}
+    file_package_components = {
+        "main.go": [("github.com/acme/pkg/submodule", "github.com/acme/pkg/submodule.Widget")]
+    }
+    local_imports_map = {}
+
+    graph_builder.build_dependency_graph(
+        source_files=source_files,
+        external_packages=external_packages,
+        file_imports=file_imports,
+        file_package_components=file_package_components,
+        local_imports_map=local_imports_map,
+    )
+    graph = graph_builder.graph
+    component_node = graph.nodes["github.com/acme/pkg/submodule.Widget"]
+
+    assert graph.number_of_nodes() == 3
+    assert graph.number_of_edges() == 2
+    assert component_node["dependency_kind"] == DEPENDENCY_KIND_PACKAGE_MANAGER
+    assert component_node["normalized_name"] == "github.com/acme/pkg"
+    assert component_node["repository_url"] == "https://github.com/acme/pkg"
+    assert component_node["url_resolution_status"] == "resolved"
 
 
 def test_build_graph_empty_inputs(graph_builder, logger):
