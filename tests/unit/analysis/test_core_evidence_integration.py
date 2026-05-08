@@ -55,6 +55,7 @@ def test_run_analysis_persists_full_result_and_machine_summary_sidecar(tmp_path,
     assert "dependency_graph" in results
     assert "top_dependencies" in results
     assert "analyzer_details" in results
+    assert all("repository_url_resolution" in package_data for package_data in results["external_packages"].values())
 
     first_dependency = results["top_dependencies"][0]
     for key in (
@@ -77,6 +78,10 @@ def test_run_analysis_persists_full_result_and_machine_summary_sidecar(tmp_path,
     assert summary["invocation"] == results["invocation"]
     assert len(summary["dependencies"]) == len(results["top_dependencies"])
     assert summary["dependencies"][0]["evidence_ref"] == "top_dependencies[0]"
+    package_dependencies = [dependency for dependency in summary["dependencies"] if dependency["kind"] == "package-manager"]
+    assert package_dependencies
+    assert "source" in package_dependencies[0]["url_resolution"]
+    assert "checked_at" in package_dependencies[0]["url_resolution"]
 
 
 @pytest.mark.integration

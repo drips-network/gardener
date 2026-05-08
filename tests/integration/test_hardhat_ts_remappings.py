@@ -24,3 +24,5 @@ def test_hardhat_ts_remappings_detected(tmp_path):
 
     pkgs = results["external_packages"]
     assert "@openzeppelin/contracts" in pkgs
+    assert pkgs["@openzeppelin/contracts"]["repository_url_resolution"]["source"] == "cache"
+    assert pkgs["@openzeppelin/contracts"]["repository_url_resolution"]["cache"] == "hit"

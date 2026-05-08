@@ -16,7 +16,7 @@ from gardener.analysis.evidence import build_repository_metadata
 from gardener.analysis.main import DependencyAnalyzer
 from gardener.common.subprocess import SecureSubprocess, SubprocessSecurityError
 from gardener.common.utils import get_logger
-from gardener.package_metadata.url_resolver import resolve_package_urls
+from gardener.package_metadata.url_resolver import resolve_package_url_receipts
 from services.shared.config import settings
 from services.shared.database import get_db_session
 from services.shared.errors import AnalysisError, AnalysisErrorType
@@ -113,17 +113,17 @@ def _preload_url_cache(db, external_packages):
 
 def _resolve_repository_urls(external_packages, logger_obj, cache):
     """
-    Use resolve_package_urls(...) and merge back into external_packages
+    Resolve repository URLs with receipt metadata
 
     Args:
         external_packages (dict): Discovered packages
         logger_obj: Logger instance to pass to resolver
-        cache (dict): Preloaded cache mapping
+        cache (dict | None): Preloaded cache mapping, or None when cache is not used
 
     Returns:
-        dict[str,str]: Mapping of package_name to repository_url
+        dict[str,dict]: Mapping of package_name to URL resolution entry
     """
-    return resolve_package_urls(external_packages, logger_obj, cache=cache)
+    return resolve_package_url_receipts(external_packages, logger_obj, cache=cache)
 
 
 def _build_drip_list(analysis_results):
@@ -326,12 +326,16 @@ def analyze_repo_task(job_id, drip_list_max_length=200, force_url_refresh=False)
 
                 # 3. Resolve URLs using the cache
                 logger.info("Resolving URLs...")
-                resolved_urls = _resolve_repository_urls(external_packages, analyzer.logger, preloaded_url_cache)
+                url_cache = None if force_url_refresh else preloaded_url_cache
+                resolution_entries = _resolve_repository_urls(external_packages, analyzer.logger, url_cache)
 
-                # Update external packages with resolved URLs
-                for name, url in resolved_urls.items():
+                # Update external packages with resolved URLs and receipts
+                for name, resolution_entry in resolution_entries.items():
                     if name in external_packages:
-                        external_packages[name]["repository_url"] = url
+                        external_packages[name]["repository_url"] = resolution_entry["repository_url"]
+                        external_packages[name]["repository_url_resolution"] = (
+                            resolution_entry["repository_url_resolution"]
+                        )
                 for name in external_packages:
                     external_packages[name].setdefault("repository_url", "")
 

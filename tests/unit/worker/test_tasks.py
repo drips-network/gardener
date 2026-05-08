@@ -41,7 +41,20 @@ class _FakeDbSession:
         self.commits += 1
 
 
-def test_analyze_repo_task_persists_service_repository_evidence_metadata(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    ("force_url_refresh", "expected_cache", "expected_receipt_cache"),
+    [
+        (False, {}, "miss"),
+        (True, None, "not-used"),
+    ],
+)
+def test_analyze_repo_task_persists_service_repository_evidence_metadata(
+    monkeypatch,
+    tmp_path,
+    force_url_refresh,
+    expected_cache,
+    expected_receipt_cache,
+):
     """
     Worker analysis persists stable repository identity, not the temporary clone path
     """
@@ -83,6 +96,7 @@ def test_analyze_repo_task_persists_service_repository_evidence_metadata(monkeyp
 
         def analyze_dependencies(self, external_packages):
             assert external_packages["dep"]["repository_url"] == "https://github.com/example/dep"
+            assert external_packages["dep"]["repository_url_resolution"]["cache"] == expected_receipt_cache
             return {
                 "schema_version": ANALYSIS_SCHEMA_VERSION,
                 "repository": self.repository_metadata,
@@ -109,15 +123,26 @@ def test_analyze_repo_task_persists_service_repository_evidence_metadata(monkeyp
     monkeypatch.setattr(worker_tasks, "_read_head_commit_sha", lambda cloned_repo_dir: commit_sha)
     monkeypatch.setattr(worker_tasks, "DependencyAnalyzer", FakeDependencyAnalyzer)
     monkeypatch.setattr(worker_tasks, "_preload_url_cache", lambda db, external_packages: {})
-    monkeypatch.setattr(
-        worker_tasks,
-        "_resolve_repository_urls",
-        lambda external_packages, logger_obj, cache: {"dep": "https://github.com/example/dep"},
-    )
+    def resolve_with_receipts(external_packages, logger_obj, cache):
+        assert cache == expected_cache
+        return {
+            "dep": {
+                "repository_url": "https://github.com/example/dep",
+                "repository_url_resolution": {
+                    "status": "resolved",
+                    "source": "npm-registry",
+                    "cache": expected_receipt_cache,
+                    "normalized": False,
+                    "checked_at": "2026-05-08T12:00:00Z",
+                },
+            }
+        }
+
+    monkeypatch.setattr(worker_tasks, "_resolve_repository_urls", resolve_with_receipts)
     monkeypatch.setattr(worker_tasks, "_persist_all", capture_persisted_results)
 
     task_callable = getattr(worker_tasks.analyze_repo_task, "run", worker_tasks.analyze_repo_task)
-    task_callable(job_id, drip_list_max_length=200, force_url_refresh=False)
+    task_callable(job_id, drip_list_max_length=200, force_url_refresh=force_url_refresh)
 
     persisted_results = captured["analysis_results"]
     assert persisted_results["repository"] == {
@@ -128,4 +153,6 @@ def test_analyze_repo_task_persists_service_repository_evidence_metadata(monkeyp
     }
     assert persisted_results["invocation"]["entrypoint"] == "service-worker"
     assert persisted_results["invocation"]["machine_summary"] is False
+    assert persisted_results["external_packages"]["dep"]["repository_url_resolution"]["cache"] == expected_receipt_cache
+    assert captured["external_packages"]["dep"]["repository_url_resolution"]["source"] == "npm-registry"
     assert captured["commit_sha"] == commit_sha

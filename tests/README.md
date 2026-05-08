@@ -37,7 +37,7 @@ python tests/run_tests.py --unit|--integration|--fixtures|--system|--all [-v] [-
 
 ## Determinism
 
-* **No live network**: registry/HTML fetches are stubbed via `tests.support.fixtures.offline_mode`
+* **No live network**: registry/HTML fetches are stubbed via `tests.support.fixtures.offline_mode`; URL-resolution tests cover receipt sources, cache states, and resolver failure reasons
 * **Stable graph serialization**: nodes/edges are sorted
 * Resource limits and timeouts are enforced to avoid flakiness.
 

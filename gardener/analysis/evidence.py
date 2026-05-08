@@ -12,6 +12,13 @@ from importlib import metadata
 from urllib.parse import urlsplit, urlunsplit
 
 from gardener.common.defaults import GraphAnalysisConfig
+from gardener.package_metadata.url_resolution import (
+    URL_RESOLUTION_STATUS_NOT_APPLICABLE as URL_RESOLUTION_NOT_APPLICABLE,
+    URL_RESOLUTION_STATUS_RESOLVED as URL_RESOLUTION_RESOLVED,
+    URL_RESOLUTION_STATUS_UNRESOLVED as URL_RESOLUTION_UNRESOLVED,
+    ensure_repository_url_resolution,
+    infer_repository_url_resolution_from_existing_url,
+)
 
 ANALYSIS_SCHEMA_VERSION = "gardener.analysis.v1"
 MACHINE_SUMMARY_SCHEMA_VERSION = "gardener.machine_summary.v1"
@@ -20,10 +27,6 @@ DEPENDENCY_KIND_PACKAGE_MANAGER = "package-manager"
 DEPENDENCY_KIND_BUILTIN = "builtin"
 DEPENDENCY_KIND_LOCAL = "local"
 DEPENDENCY_KIND_UNKNOWN = "unknown"
-
-URL_RESOLUTION_RESOLVED = "resolved"
-URL_RESOLUTION_UNRESOLVED = "unresolved"
-URL_RESOLUTION_NOT_APPLICABLE = "not-applicable"
 
 _INVOCATION_KEYS = (
     "entrypoint",
@@ -239,15 +242,18 @@ def enrich_external_packages(external_packages: dict) -> dict:
     packages = _require_container(external_packages, dict, "external_packages")
     enriched = {}
     for package_name, package_data in packages.items():
-        package_info = dict(_require_container(package_data, dict, f"external_packages[{package_name}]"))
-        package_info.update(
-            classify_dependency_fact(
-                package_name,
-                ecosystem=package_info.get("ecosystem"),
-                is_package_manager=True,
-                repository_url=package_info.get("repository_url"),
-            )
+        package_info = ensure_repository_url_resolution(
+            _require_container(package_data, dict, f"external_packages[{package_name}]")
         )
+        repository_url_resolution = package_info["repository_url_resolution"]
+        classification = classify_dependency_fact(
+            package_name,
+            ecosystem=package_info.get("ecosystem"),
+            is_package_manager=True,
+            repository_url=package_info.get("repository_url"),
+        )
+        classification["url_resolution_status"] = repository_url_resolution["status"]
+        package_info.update(classification)
         enriched[package_name] = package_info
     return enriched
 
@@ -466,6 +472,13 @@ def _project_summary_dependency(dependency: dict, index: int, centrality_metric:
         ),
         context,
     )
+    url_resolution = {"status": dependency["url_resolution_status"]}
+    if dependency["dependency_kind"] == DEPENDENCY_KIND_PACKAGE_MANAGER:
+        if isinstance(dependency.get("repository_url_resolution"), dict):
+            url_resolution = dict(dependency["repository_url_resolution"])
+        else:
+            url_resolution = infer_repository_url_resolution_from_existing_url(dependency["package_url"])
+
     return {
         "name": dependency["package_name"],
         "kind": dependency["dependency_kind"],
@@ -473,7 +486,7 @@ def _project_summary_dependency(dependency: dict, index: int, centrality_metric:
         "runtime": dependency["runtime"],
         "normalized_name": dependency["normalized_name"],
         "repository_url": dependency["package_url"],
-        "url_resolution": {"status": dependency["url_resolution_status"]},
+        "url_resolution": url_resolution,
         "centrality": {
             "metric": centrality_metric,
             "percentage": dependency["percentage"],

@@ -6,7 +6,38 @@ import json
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+
+from gardener.package_metadata.url_resolution import (
+    URL_RESOLUTION_CACHE_HIT,
+    URL_RESOLUTION_CACHE_MISS,
+    URL_RESOLUTION_CACHE_NOT_USED,
+    URL_RESOLUTION_REASON_INVALID_CACHE_ENTRY,
+    URL_RESOLUTION_REASON_INVALID_REGISTRY_RESPONSE,
+    URL_RESOLUTION_REASON_NETWORK_ERROR,
+    URL_RESOLUTION_REASON_NO_DATA_RETURNED,
+    URL_RESOLUTION_REASON_NO_REPOSITORY_URL,
+    URL_RESOLUTION_REASON_NORMALIZATION_FAILED,
+    URL_RESOLUTION_REASON_RESOLVER_ERROR,
+    URL_RESOLUTION_REASON_UNSUPPORTED_ECOSYSTEM,
+    URL_RESOLUTION_REASON_VALIDATION_REJECTED,
+    URL_RESOLUTION_SOURCE_CACHE,
+    URL_RESOLUTION_SOURCE_CRATES_IO,
+    URL_RESOLUTION_SOURCE_GITMODULES,
+    URL_RESOLUTION_SOURCE_GO_GET_META,
+    URL_RESOLUTION_SOURCE_GO_IMPORT_PATH,
+    URL_RESOLUTION_SOURCE_NPM_REGISTRY,
+    URL_RESOLUTION_SOURCE_PYPI_REGISTRY,
+    URL_RESOLUTION_SOURCE_SOLIDITY_SOURCE_HINT,
+    URL_RESOLUTION_SOURCE_STATIC_RULE,
+    URL_RESOLUTION_SOURCE_UNSUPPORTED_ECOSYSTEM,
+    URL_RESOLUTION_STATUS_RESOLVED,
+    URL_RESOLUTION_STATUS_UNRESOLVED,
+    build_repository_url_resolution,
+    sanitize_repository_url,
+    utc_now_isoformat,
+)
 
 try:
     from gardener.common.input_validation import InputValidator, ValidationError
@@ -52,14 +83,11 @@ def set_request_fn(fn):
 
 # Module-internal regex patterns for repository URL parsing
 # Underscore-prefixed to indicate non-public API usage
-_RE_GH_OWNER_REPO_COLON_OR_SLASH = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?(?:\s|$)")
-_RE_GH_OWNER_REPO_SLASH = re.compile(r"github\.com/([^/]+/[^/]+)")
 _RE_GH_PAGES = re.compile(r"https?://([^/]+)\.github\.io/([^/]+)")
 _RE_GL_PAGES = re.compile(r"https?://([^/]+)\.gitlab\.io/([^/]+)")
 _RE_GO_IMPORT_META = re.compile(
     r'<meta\s+name=["\']go-import["\']\s+content=["\']([^ ]+)\s+(git|hg|svn|bzr)\s+([^"\']+)["\']', re.IGNORECASE
 )
-_RE_GH_CANONICAL = re.compile(r"(https?://(?:www\.)?github\.com/[^/]+/[^/]+)")
 _RE_OWNER_REPO_SHORTHAND = re.compile(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$")
 
 
@@ -108,6 +136,8 @@ def _request_once(url, logger=None):
             else:
                 text = str(raw)
             return 200, json.loads(text), None
+        except json.JSONDecodeError as e:
+            return 200, None, e
         except Exception as e:
             return None, None, e
 
@@ -119,6 +149,64 @@ def _request_once(url, logger=None):
             return 404, None, None
         http_err = urllib.error.HTTPError(url, response.status, response.reason, response.headers, None)
         return response.status, None, http_err
+
+
+def _make_request_outcome(url, logger=None):
+    """
+    Make an HTTP GET request and return data with a stable failure reason
+    """
+    validated = _validate_or_none(url, logger)
+    if validated is None:
+        return {"data": None, "reason": URL_RESOLUTION_REASON_VALIDATION_REJECTED}
+    url = validated
+
+    last_exception = None
+    last_reason = URL_RESOLUTION_REASON_NETWORK_ERROR
+    delay = RETRY_DELAY
+    for attempt in range(RETRY_COUNT + 1):
+        try:
+            status, data, single_error = _request_once(url, logger)
+            if status == 200:
+                if isinstance(data, dict):
+                    return {"data": data, "reason": None}
+                last_exception = single_error
+                last_reason = URL_RESOLUTION_REASON_INVALID_REGISTRY_RESPONSE
+                logger and logger.warning(f"Invalid JSON registry response for {url}")
+                break
+            if status == 404:
+                logger and logger.debug(f"Package not found (404): {url}")
+                return {"data": None, "reason": URL_RESOLUTION_REASON_NO_DATA_RETURNED}
+            if status is not None:
+                last_exception = single_error
+                last_reason = URL_RESOLUTION_REASON_NETWORK_ERROR
+                logger and logger.warning(f"HTTP error {status} for {url} (attempt {attempt + 1}/{RETRY_COUNT + 1})")
+
+        except urllib.error.HTTPError as e:
+            last_exception = e
+            if e.code == 404:
+                logger and logger.debug(f"Package not found (404): {url}")
+                return {"data": None, "reason": URL_RESOLUTION_REASON_NO_DATA_RETURNED}
+            last_reason = URL_RESOLUTION_REASON_NETWORK_ERROR
+            logger and logger.warning(
+                f"HTTP error {e.code} for {url} " f"(attempt {attempt + 1}/{RETRY_COUNT + 1}): {e.reason}"
+            )
+        except json.JSONDecodeError as e:
+            last_exception = e
+            last_reason = URL_RESOLUTION_REASON_INVALID_REGISTRY_RESPONSE
+            logger and logger.warning(f"Invalid JSON registry response for {url}: {e}")
+            break
+        except Exception as e:
+            last_exception = e
+            last_reason = URL_RESOLUTION_REASON_NETWORK_ERROR
+            logger and logger.warning(f"Error fetching {url} (attempt {attempt + 1}/{RETRY_COUNT + 1}): {e}")
+
+        if attempt < RETRY_COUNT:
+            logger and logger.debug(f"Retrying in {delay}s...")
+            time.sleep(delay)
+            delay *= 2  # Exponential backoff
+
+    logger and logger.error(f"Failed to fetch {url} after {RETRY_COUNT + 1} attempts. Last error: {last_exception}")
+    return {"data": None, "reason": last_reason}
 
 
 def _make_request(url, logger=None):
@@ -135,45 +223,7 @@ def _make_request(url, logger=None):
     Returns:
         JSON response data as dict, or None if request fails or returns 404
     """
-    # Validate URL for security
-    validated = _validate_or_none(url, logger)
-    if validated is None:
-        return None
-    url = validated
-
-    last_exception = None
-    delay = RETRY_DELAY
-    for attempt in range(RETRY_COUNT + 1):
-        try:
-            status, data, single_error = _request_once(url, logger)
-            if status == 200:
-                return data
-            if status == 404:
-                logger and logger.debug(f"Package not found (404): {url}")
-                return None
-            if status is not None:
-                last_exception = single_error
-                logger and logger.warning(f"HTTP error {status} for {url} (attempt {attempt + 1}/{RETRY_COUNT + 1})")
-
-        except urllib.error.HTTPError as e:
-            last_exception = e
-            if e.code == 404:
-                logger and logger.debug(f"Package not found (404): {url}")
-                return None  # Explicitly return None on 404
-            logger and logger.warning(
-                f"HTTP error {e.code} for {url} " f"(attempt {attempt + 1}/{RETRY_COUNT + 1}): {e.reason}"
-            )
-        except Exception as e:
-            last_exception = e
-            logger and logger.warning(f"Error fetching {url} (attempt {attempt + 1}/{RETRY_COUNT + 1}): {e}")
-
-        if attempt < RETRY_COUNT:
-            logger and logger.debug(f"Retrying in {delay}s...")
-            time.sleep(delay)
-            delay *= 2  # Exponential backoff
-
-    logger and logger.error(f"Failed to fetch {url} after {RETRY_COUNT + 1} attempts. Last error: {last_exception}")
-    return None
+    return _make_request_outcome(url, logger)["data"]
 
 
 def _strip_fragment(url_str):
@@ -213,6 +263,37 @@ def _normalize_git_prefixes(url_str):
     return u
 
 
+def _safe_urlsplit(url_str):
+    """
+    Parse a URL-like string without allowing malformed metadata to raise
+    """
+    try:
+        return urllib.parse.urlsplit(url_str)
+    except ValueError:
+        return None
+
+
+def _strip_url_credentials(url_str):
+    """
+    Remove username/password credentials from URL-like strings
+
+    Args:
+        url_str (str): Repository URL string
+
+    Returns:
+        URL string without userinfo
+    """
+    if not isinstance(url_str, str):
+        return url_str
+    parsed = _safe_urlsplit(url_str)
+    if parsed is None:
+        return None
+    if not parsed.scheme or not parsed.netloc or "@" not in parsed.netloc:
+        return url_str
+    netloc = parsed.netloc.rsplit("@", 1)[1]
+    return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
 def _extract_github_owner_repo(url_str):
     """
     Trim GitHub URL to 'https://github.com/<owner>/<repo>' if present
@@ -225,10 +306,24 @@ def _extract_github_owner_repo(url_str):
     """
     if not isinstance(url_str, str):
         return url_str
-    if "github.com" in url_str:
-        match = _RE_GH_CANONICAL.match(url_str)
-        if match:
-            return match.group(1)
+
+    scp_match = re.match(r"^(?:ssh://)?(?:git@)?github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?(?:\s|$)", url_str)
+    if scp_match:
+        return f"https://github.com/{scp_match.group(1)}"
+
+    parsed = _safe_urlsplit(url_str)
+    if parsed is None:
+        return None
+    if parsed.scheme not in {"http", "https"}:
+        return url_str
+
+    host = (parsed.hostname or "").lower()
+    if host not in {"github.com", "www.github.com"}:
+        return url_str
+
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 2:
+        return f"https://github.com/{parts[0]}/{parts[1]}"
     return url_str
 
 
@@ -286,11 +381,16 @@ def _clean_repo_url(repo_url):
 
     u = _strip_fragment(repo_url)
     u = _normalize_git_prefixes(u)
+    u = _strip_url_credentials(u)
+    if not u:
+        return None
     u = _extract_github_owner_repo(u)
+    if not u:
+        return None
     u = _strip_dot_git(u)
 
     if u.startswith("http://") or u.startswith("https://"):
-        return u
+        return sanitize_repository_url(u) or None
 
     assumed = _assume_github_from_owner_repo_shorthand(u)
     if assumed:
@@ -300,6 +400,231 @@ def _clean_repo_url(repo_url):
 
 
 # Main resolution logic:
+
+
+def _is_solidity_alias_like(name):
+    """
+    Heuristic: skip npm lookups for Solidity alias tokens
+
+    - Trailing slash (e.g., '@openzeppelin/') indicates a remapping prefix
+    - Bare scope '@scope' without a package segment
+    """
+    if not isinstance(name, str):
+        return False
+    if name.endswith("/"):
+        return True
+    if name.startswith("@") and "/" not in name:
+        return True
+    return False
+
+
+def _finalize_url_attempt(
+    *,
+    raw_url,
+    source,
+    cache_state,
+    checked_at,
+    unresolved_reason,
+    invalid_url_reason=URL_RESOLUTION_REASON_NORMALIZATION_FAILED,
+):
+    """
+    Convert a raw URL candidate into the canonical resolver entry shape
+    """
+    if raw_url:
+        cleaned_url = _clean_repo_url(raw_url)
+        if cleaned_url:
+            return {
+                "repository_url": cleaned_url,
+                "repository_url_resolution": build_repository_url_resolution(
+                    status=URL_RESOLUTION_STATUS_RESOLVED,
+                    source=source,
+                    cache=cache_state,
+                    normalized=cleaned_url != raw_url,
+                    checked_at=checked_at,
+                ),
+            }
+        return {
+            "repository_url": "",
+            "repository_url_resolution": build_repository_url_resolution(
+                status=URL_RESOLUTION_STATUS_UNRESOLVED,
+                source=source,
+                cache=cache_state,
+                normalized=False,
+                checked_at=checked_at,
+                reason=invalid_url_reason,
+            ),
+        }
+
+    return {
+        "repository_url": "",
+        "repository_url_resolution": build_repository_url_resolution(
+            status=URL_RESOLUTION_STATUS_UNRESOLVED,
+            source=source,
+            cache=cache_state,
+            normalized=False,
+            checked_at=checked_at,
+            reason=unresolved_reason,
+        ),
+    }
+
+
+def _attempt_to_resolution_entry(attempt, cache_state, checked_at):
+    """
+    Finalize a source attempt dict into a resolver entry
+    """
+    return _finalize_url_attempt(
+        raw_url=attempt.get("raw_url"),
+        source=attempt["source"],
+        cache_state=cache_state,
+        checked_at=checked_at,
+        unresolved_reason=attempt.get("reason") or URL_RESOLUTION_REASON_NO_REPOSITORY_URL,
+    )
+
+
+def _select_decisive_unresolved_entry(entries):
+    """
+    Pick the unresolved receipt that best represents a failed multi-attempt resolution
+    """
+    error_reasons = {
+        URL_RESOLUTION_REASON_NETWORK_ERROR,
+        URL_RESOLUTION_REASON_VALIDATION_REJECTED,
+        URL_RESOLUTION_REASON_INVALID_REGISTRY_RESPONSE,
+        URL_RESOLUTION_REASON_NORMALIZATION_FAILED,
+        URL_RESOLUTION_REASON_RESOLVER_ERROR,
+    }
+    for entry in entries:
+        receipt = entry["repository_url_resolution"]
+        if receipt.get("reason") in error_reasons:
+            return entry
+    return entries[-1]
+
+
+def _source_for_resolver_error(ecosystem):
+    """
+    Return the most accurate source taxonomy value for an unexpected resolver error
+    """
+    return {
+        "npm": URL_RESOLUTION_SOURCE_NPM_REGISTRY,
+        "pypi": URL_RESOLUTION_SOURCE_PYPI_REGISTRY,
+        "cargo": URL_RESOLUTION_SOURCE_CRATES_IO,
+        "go": URL_RESOLUTION_SOURCE_GO_GET_META,
+        "solidity": URL_RESOLUTION_SOURCE_SOLIDITY_SOURCE_HINT,
+    }.get(ecosystem, URL_RESOLUTION_SOURCE_UNSUPPORTED_ECOSYSTEM)
+
+
+def _resolve_package_url_receipt(package_name, package_data, logger, cache_state, checked_at):
+    """
+    Resolve one package to a canonical resolver entry
+    """
+    ecosystem = package_data.get("ecosystem", "unknown")
+    attempts = []
+
+    gitmodules_url_source = package_data.get("gitmodules_url")
+    if gitmodules_url_source and isinstance(gitmodules_url_source, str):
+        gitmodules_entry = _finalize_url_attempt(
+            raw_url=gitmodules_url_source,
+            source=URL_RESOLUTION_SOURCE_GITMODULES,
+            cache_state=cache_state,
+            checked_at=checked_at,
+            unresolved_reason=URL_RESOLUTION_REASON_NORMALIZATION_FAILED,
+        )
+        if gitmodules_entry["repository_url"]:
+            logger and logger.info(f"Resolved {package_name} using .gitmodules URL: {gitmodules_entry['repository_url']}")
+            return gitmodules_entry
+        attempts.append(gitmodules_entry)
+
+    try:
+        if ecosystem == "npm":
+            attempts.append(_attempt_to_resolution_entry(_resolve_npm_package_attempt(package_name, logger), cache_state, checked_at))
+        elif ecosystem == "pypi":
+            attempts.append(_attempt_to_resolution_entry(_resolve_pypi_package_attempt(package_name, logger), cache_state, checked_at))
+        elif ecosystem == "cargo":
+            attempts.append(_attempt_to_resolution_entry(_resolve_cargo_package_attempt(package_name, logger), cache_state, checked_at))
+        elif ecosystem == "go":
+            attempts.append(_attempt_to_resolution_entry(_resolve_go_package_attempt(package_name, logger), cache_state, checked_at))
+        elif ecosystem == "solidity":
+            attempts.extend(
+                _attempt_to_resolution_entry(attempt, cache_state, checked_at)
+                for attempt in _resolve_solidity_package_attempts(package_name, package_data, logger)
+            )
+        else:
+            attempts.append(
+                _finalize_url_attempt(
+                    raw_url=None,
+                    source=URL_RESOLUTION_SOURCE_UNSUPPORTED_ECOSYSTEM,
+                    cache_state=cache_state,
+                    checked_at=checked_at,
+                    unresolved_reason=URL_RESOLUTION_REASON_UNSUPPORTED_ECOSYSTEM,
+                )
+            )
+    except Exception as e:
+        logger and logger.warning(f"Error resolving URL for {package_name} ({ecosystem}): {e}")
+        attempts.append(
+            _finalize_url_attempt(
+                raw_url=None,
+                source=_source_for_resolver_error(ecosystem),
+                cache_state=cache_state,
+                checked_at=checked_at,
+                unresolved_reason=URL_RESOLUTION_REASON_RESOLVER_ERROR,
+            )
+        )
+
+    for entry in attempts:
+        if entry["repository_url"]:
+            logger and logger.debug(f"Resolved {package_name} ({ecosystem}) -> {entry['repository_url']}")
+            return entry
+    logger and logger.debug(f"Could not resolve URL for {package_name} ({ecosystem})")
+    return _select_decisive_unresolved_entry(attempts)
+
+
+def resolve_package_url_receipts(packages_dict, logger=None, cache=None, *, checked_at=None):
+    """
+    Resolve package names to repository URLs with canonical resolution receipts
+    """
+    receipt_checked_at = checked_at or utc_now_isoformat()
+    cache_was_supplied = cache is not None
+    cache_map = cache if cache_was_supplied else {}
+    resolved_entries = {}
+
+    for package_name, package_data in packages_dict.items():
+        try:
+            ecosystem = package_data.get("ecosystem", "unknown")
+            cache_key = f"{ecosystem}:{package_name}"
+            if cache_was_supplied and cache_key in cache_map:
+                resolved_entries[package_name] = _finalize_url_attempt(
+                    raw_url=cache_map[cache_key],
+                    source=URL_RESOLUTION_SOURCE_CACHE,
+                    cache_state=URL_RESOLUTION_CACHE_HIT,
+                    checked_at=receipt_checked_at,
+                    unresolved_reason=URL_RESOLUTION_REASON_INVALID_CACHE_ENTRY,
+                    invalid_url_reason=URL_RESOLUTION_REASON_INVALID_CACHE_ENTRY,
+                )
+                logger and logger.debug(
+                    f"Resolved {package_name} from cache -> {resolved_entries[package_name]['repository_url']}"
+                )
+                continue
+
+            cache_state = URL_RESOLUTION_CACHE_MISS if cache_was_supplied else URL_RESOLUTION_CACHE_NOT_USED
+            resolved_entries[package_name] = _resolve_package_url_receipt(
+                package_name,
+                package_data,
+                logger,
+                cache_state,
+                receipt_checked_at,
+            )
+        except Exception as e:
+            ecosystem = package_data.get("ecosystem", "unknown") if isinstance(package_data, dict) else "unknown"
+            cache_state = URL_RESOLUTION_CACHE_MISS if cache_was_supplied else URL_RESOLUTION_CACHE_NOT_USED
+            logger and logger.warning(f"Error resolving URL for {package_name} ({ecosystem}): {e}")
+            resolved_entries[package_name] = _finalize_url_attempt(
+                raw_url=None,
+                source=_source_for_resolver_error(ecosystem),
+                cache_state=cache_state,
+                checked_at=receipt_checked_at,
+                unresolved_reason=URL_RESOLUTION_REASON_RESOLVER_ERROR,
+            )
+
+    return resolved_entries
 
 
 def resolve_package_urls(packages_dict, logger=None, cache=None):
@@ -314,76 +639,12 @@ def resolve_package_urls(packages_dict, logger=None, cache=None):
     Returns:
         Dictionary containing resolved package URLs
     """
-    resolved_urls = {}
-    cache = cache or {}
-
-    def _is_solidity_alias_like(name):
-        """
-        Heuristic: skip npm lookups for Solidity alias tokens
-
-        - Trailing slash (e.g., '@openzeppelin/') indicates a remapping prefix
-        - Bare scope '@scope' without a package segment
-        """
-        if not isinstance(name, str):
-            return False
-        if name.endswith("/"):
-            return True
-        if name.startswith("@") and "/" not in name:
-            return True
-        return False
-
-    for package_name, package_data in packages_dict.items():
-        ecosystem = package_data.get("ecosystem", "unknown")
-        url = None
-
-        # Check cache first
-        cache_key = f"{ecosystem}:{package_name}"
-        if cache_key in cache:
-            resolved_urls[package_name] = cache[cache_key]
-            logger and logger.debug(f"Resolved {package_name} from cache -> {cache[cache_key]}")
-            continue
-
-        # Attempt to resolve using .gitmodules URL first
-        gitmodules_url_source = package_data.get("gitmodules_url")
-        if gitmodules_url_source and isinstance(gitmodules_url_source, str):
-            cleaned_gitmodules_url = _clean_repo_url(gitmodules_url_source)
-            if cleaned_gitmodules_url:
-                url = cleaned_gitmodules_url
-                logger and logger.info(f"Resolved {package_name} using .gitmodules URL: {url}")
-
-        # If URL was not resolved from gitmodules, proceed with ecosystem-specific resolution
-        if not url:
-            try:
-                if ecosystem == "npm":
-                    url = resolve_npm_package(package_name, logger)
-                elif ecosystem == "pypi":
-                    url = resolve_pypi_package(package_name, logger)
-                elif ecosystem == "cargo":
-                    url = resolve_cargo_package(package_name, logger)
-                elif ecosystem == "go":
-                    url = resolve_go_package(package_name, logger)
-                elif ecosystem == "solidity":
-                    # Solidity often uses npm. Avoid lookups for alias-like names.
-                    if not _is_solidity_alias_like(package_name):
-                        url = resolve_npm_package(package_name, logger)
-                    if not url:
-                        # Placeholder for potential Etherscan/Sourcegraph resolution
-                        url = resolve_solidity_contract(package_name, package_data.get("source"), logger)
-            except Exception as e:
-                logger and logger.warning(f"Error resolving URL for {package_name} ({ecosystem}): {e}")
-
-        if url:
-            # Clean the resolved URL before storing
-            cleaned_url = _clean_repo_url(url)
-            if cleaned_url:
-                resolved_urls[package_name] = cleaned_url
-                logger and logger.debug(f"Resolved {package_name} ({ecosystem}) -> {cleaned_url}")
-            else:
-                logger and logger.debug(f"Could not clean URL for {package_name} ({ecosystem}): {url}")
-        else:
-            logger and logger.debug(f"Could not resolve URL for {package_name} ({ecosystem})")
-
-    return resolved_urls
+    resolution_entries = resolve_package_url_receipts(packages_dict, logger=logger, cache=cache)
+    return {
+        package_name: entry["repository_url"]
+        for package_name, entry in resolution_entries.items()
+        if entry["repository_url"]
+    }
 
 
 def _npm_is_types_package(package_name):
@@ -446,44 +707,98 @@ def _npm_pick_version_metadata(data):
     return None
 
 
-def _npm_from_repository(repo_info, logger=None):
+def _is_github_url(url_str):
     """
-    Interpret 'repository' field (dict or str) to a GitHub/GitLab URL
+    Return whether a cleaned URL points at GitHub
+    """
+    parsed = _safe_urlsplit(url_str)
+    return bool(parsed and (parsed.hostname or "").lower() == "github.com")
 
-    Returns:
-        Cleaned URL or None
+
+def _is_repository_host_url(url_str):
+    """
+    Return whether a cleaned URL points at a supported repository host
+    """
+    parsed = _safe_urlsplit(url_str)
+    repository_hosts = {"github.com", "www.github.com", "gitlab.com", "www.gitlab.com"}
+    return bool(parsed and (parsed.hostname or "").lower() in repository_hosts)
+
+
+def _explicit_github_raw_candidate(candidate):
+    """
+    Return raw candidate only for explicit URL/SCM forms with an anchored GitHub host
+    """
+    if not isinstance(candidate, str):
+        return None
+    normalized = _normalize_git_prefixes(_strip_fragment(candidate))
+    parsed = _safe_urlsplit(normalized)
+    if parsed is None:
+        return None
+    has_explicit_scheme = parsed.scheme in {"http", "https", "ssh"}
+    is_scp_like = normalized.startswith("git@github.com:")
+    if not has_explicit_scheme and not is_scp_like:
+        return None
+    cleaned = _clean_repo_url(candidate)
+    if cleaned and _is_github_url(cleaned):
+        return candidate
+    return None
+
+
+def _npm_from_repository_raw(repo_info, logger=None):
+    """
+    Interpret 'repository' field and return a raw repository URL candidate
     """
     if not repo_info:
         return None
-    logger and logger.debug(f"Repository info: {repo_info}")
+    logger and logger.debug("Repository metadata present")
 
     if isinstance(repo_info, dict):
-        repo_url = _clean_repo_url(repo_info.get("url"))
-        if repo_url:
+        repo_url = repo_info.get("url")
+        if isinstance(repo_url, str) and repo_url and _clean_repo_url(repo_url):
             return repo_url
         for key, value in repo_info.items():
-            if isinstance(value, str) and "github.com" in value:
-                match = _RE_GH_OWNER_REPO_COLON_OR_SLASH.search(value)
-                if match:
-                    return f"https://github.com/{match.group(1)}"
+            if key == "url":
+                continue
+            explicit_candidate = _explicit_github_raw_candidate(value)
+            if explicit_candidate:
+                return explicit_candidate
+        if isinstance(repo_url, str) and repo_url:
+            return repo_url
         return None
 
     if isinstance(repo_info, str):
-        repo_url = _clean_repo_url(repo_info)
-        if repo_url:
-            return repo_url
-        if "github.com" in repo_info:
-            match = _RE_GH_OWNER_REPO_COLON_OR_SLASH.search(repo_info)
-            if match:
-                return f"https://github.com/{match.group(1)}"
-        elif repo_info.startswith("github:"):
+        if repo_info.startswith("github:"):
             return f"https://github.com/{repo_info[7:]}"
+        if repo_info:
+            return repo_info
+    return None
+
+
+def _npm_cleanable_repository_raw(repo_info, logger=None):
+    """
+    Return a repository candidate immediately only when it can be normalized
+    """
+    raw_url = _npm_from_repository_raw(repo_info, logger)
+    if raw_url and _clean_repo_url(raw_url):
+        return raw_url
+    return None
+
+
+def _github_raw_candidate(candidate):
+    """
+    Return raw candidate only when it cleans to an actual GitHub URL
+    """
+    if not isinstance(candidate, str):
+        return None
+    cleaned = _clean_repo_url(candidate)
+    if cleaned and _is_github_url(cleaned):
+        return candidate
     return None
 
 
 def _npm_from_bugs(bugs_info):
     """
-    Extract GitHub URL from 'bugs' dict or string using existing regex
+    Extract raw GitHub URL candidate from 'bugs' dict or string
 
     Args:
         bugs_info: Bugs field value
@@ -494,21 +809,15 @@ def _npm_from_bugs(bugs_info):
     if not bugs_info:
         return None
     if isinstance(bugs_info, dict) and "url" in bugs_info:
-        bugs_url = bugs_info["url"]
-        if isinstance(bugs_url, str) and "github.com" in bugs_url:
-            match = _RE_GH_OWNER_REPO_SLASH.search(bugs_url)
-            if match:
-                return f"https://github.com/{match.group(1)}"
-    elif isinstance(bugs_info, str) and "github.com" in bugs_info:
-        match = _RE_GH_OWNER_REPO_SLASH.search(bugs_info)
-        if match:
-            return f"https://github.com/{match.group(1)}"
+        return _github_raw_candidate(bugs_info["url"])
+    if isinstance(bugs_info, str):
+        return _github_raw_candidate(bugs_info)
     return None
 
 
 def _npm_from_homepage(homepage):
     """
-    Extract GitHub URL from 'homepage' string using existing regex
+    Extract raw GitHub URL candidate from 'homepage' string
 
     Args:
         homepage: Homepage field value
@@ -516,11 +825,7 @@ def _npm_from_homepage(homepage):
     Returns:
         str or None
     """
-    if homepage and isinstance(homepage, str) and "github.com" in homepage:
-        match = _RE_GH_OWNER_REPO_SLASH.search(homepage)
-        if match:
-            return f"https://github.com/{match.group(1)}"
-    return None
+    return _github_raw_candidate(homepage)
 
 
 def _npm_infer_from_scoped_text(package_name, data, logger=None):
@@ -544,6 +849,73 @@ def _npm_infer_from_scoped_text(package_name, data, logger=None):
     return None
 
 
+def _url_from_attempt(attempt):
+    """
+    Project a raw attempt dict to a URL-only value for existing public helpers
+    """
+    return _attempt_to_resolution_entry(attempt, URL_RESOLUTION_CACHE_NOT_USED, utc_now_isoformat())["repository_url"] or None
+
+
+def _resolve_npm_package_attempt(package_name, logger=None):
+    """
+    Resolve npm package to a raw URL attempt
+    """
+    u = _npm_is_types_package(package_name)
+    if u:
+        return {"raw_url": u, "source": URL_RESOLUTION_SOURCE_STATIC_RULE, "reason": None}
+
+    if package_name.startswith("@docusaurus/"):
+        return {
+            "raw_url": "https://github.com/facebook/docusaurus",
+            "source": URL_RESOLUTION_SOURCE_STATIC_RULE,
+            "reason": None,
+        }
+
+    outcome = _make_request_outcome(_npm_registry_url(package_name), logger)
+    data = outcome["data"]
+
+    if not data:
+        logger and logger.warning(f"No data returned from npm registry for {package_name}")
+        return {
+            "raw_url": None,
+            "source": URL_RESOLUTION_SOURCE_NPM_REGISTRY,
+            "reason": outcome["reason"] or URL_RESOLUTION_REASON_NO_DATA_RETURNED,
+        }
+
+    version_data = _npm_pick_version_metadata(data)
+    invalid_repository_candidate = None
+
+    for metadata in [version_data, data]:
+        if not metadata:
+            continue
+        repository_info = metadata.get("repository")
+        u = _npm_cleanable_repository_raw(repository_info, logger)
+        if u:
+            return {"raw_url": u, "source": URL_RESOLUTION_SOURCE_NPM_REGISTRY, "reason": None}
+        if invalid_repository_candidate is None:
+            invalid_repository_candidate = _npm_from_repository_raw(repository_info, logger)
+        u = _npm_from_bugs(metadata.get("bugs"))
+        if u:
+            return {"raw_url": u, "source": URL_RESOLUTION_SOURCE_NPM_REGISTRY, "reason": None}
+        u = _npm_from_homepage(metadata.get("homepage"))
+        if u:
+            return {"raw_url": u, "source": URL_RESOLUTION_SOURCE_NPM_REGISTRY, "reason": None}
+
+    u = _npm_infer_from_scoped_text(package_name, data, logger)
+    if u:
+        return {"raw_url": u, "source": URL_RESOLUTION_SOURCE_NPM_REGISTRY, "reason": None}
+
+    if invalid_repository_candidate:
+        return {"raw_url": invalid_repository_candidate, "source": URL_RESOLUTION_SOURCE_NPM_REGISTRY, "reason": None}
+
+    logger and logger.debug(f"Couldn't resolve GitHub URL for {package_name}")
+    return {
+        "raw_url": None,
+        "source": URL_RESOLUTION_SOURCE_NPM_REGISTRY,
+        "reason": URL_RESOLUTION_REASON_NO_REPOSITORY_URL,
+    }
+
+
 def resolve_npm_package(package_name, logger=None):
     """
     Resolve npm package to repository URL
@@ -555,44 +927,7 @@ def resolve_npm_package(package_name, logger=None):
     Returns:
         Repository URL string or None if not found
     """
-    # Special handling for TypeScript definition packages (@types/*)
-    u = _npm_is_types_package(package_name)
-    if u:
-        return u
-
-    # Fast-path: known monorepo scope fallback when registry metadata is incomplete
-    if package_name.startswith("@docusaurus/"):
-        return "https://github.com/facebook/docusaurus"
-
-    data = _npm_fetch_metadata(package_name, logger)
-
-    if not data:
-        logger and logger.warning(f"No data returned from npm registry for {package_name}")
-        return None
-
-    version_data = _npm_pick_version_metadata(data)
-
-    # Try to find repository information in version metadata first, then fall back to top-level
-    for metadata in [version_data, data]:
-        if not metadata:
-            continue
-        u = _npm_from_repository(metadata.get("repository"), logger)
-        if u:
-            return u
-        u = _npm_from_bugs(metadata.get("bugs"))
-        if u:
-            return u
-        u = _npm_from_homepage(metadata.get("homepage"))
-        if u:
-            return u
-
-    # 4. Infer from package name for other scoped packages
-    u = _npm_infer_from_scoped_text(package_name, data, logger)
-    if u:
-        return u
-
-    logger and logger.debug(f"Couldn't resolve GitHub URL for {package_name}")
-    return None
+    return _url_from_attempt(_resolve_npm_package_attempt(package_name, logger))
 
 
 def _pep503_normalize(name):
@@ -609,22 +944,6 @@ def _pep503_normalize(name):
         return name
     # Collapse runs of -, _, . into '-'; lowercase
     return re.sub(r"[-_.]+", "-", name.strip()).lower()
-
-
-def _pypi_fetch_metadata(package_name, logger=None):
-    """
-    Fetch PyPI metadata JSON using _make_request
-
-    Args:
-        package_name (str): Package name
-        logger: Optional logger
-
-    Returns:
-        dict or None
-    """
-    normalized = _pep503_normalize(package_name)
-    url = f"https://pypi.org/pypi/{normalized}/json"
-    return _make_request(url, logger)
 
 
 def _pypi_extract_info(data):
@@ -658,70 +977,93 @@ def _pypi_lowercase_urls(project_urls, logger, package_name):
     return lowercase_urls
 
 
-def _pypi_preferred_url(lowercase_urls):
+def _pypi_preferred_url_raw(lowercase_urls):
     """
-    Iterate preferred keys and return cleaned GitHub/GitLab URL if any
-
-    Args:
-        lowercase_urls (dict): Lowercased project URLs
-
-    Returns:
-        str or None
+    Iterate preferred keys and return a raw GitHub/GitLab URL candidate if any
     """
     preferred_keys = [
         "repository",
         "source",
         "source code",
         "github",
-        # Common alternatives seen in the wild
         "repo",
         "code",
         "code repository",
         "vc",
-        # Fall back to homepage after these
         "homepage",
         "home",
     ]
     for key in preferred_keys:
-        proj_url = _clean_repo_url(lowercase_urls.get(key))
-        if proj_url and ("github.com" in proj_url or "gitlab.com" in proj_url):
-            return proj_url
+        raw_url = lowercase_urls.get(key)
+        cleaned = _clean_repo_url(raw_url)
+        if cleaned and _is_repository_host_url(cleaned):
+            return raw_url
     return None
 
 
-def _pypi_home_page(info):
+def _pypi_home_page_raw(info):
     """
-    Return cleaned 'home_page' URL if it is GitHub/GitLab, else None
-
-    Args:
-        info (dict): Info dict from PyPI
-
-    Returns:
-        str or None
+    Return raw 'home_page' URL if it cleans to GitHub/GitLab, else None
     """
-    homepage = _clean_repo_url(info.get("home_page"))
-    if homepage and ("github.com" in homepage or "gitlab.com" in homepage):
-        return homepage
+    raw_homepage = info.get("home_page")
+    homepage = _clean_repo_url(raw_homepage)
+    if homepage and _is_repository_host_url(homepage):
+        return raw_homepage
     return None
 
 
-def _pypi_find_any_repo_in_urls(lowercase_urls):
+def _pypi_find_any_repo_in_urls_raw(lowercase_urls):
     """
-    Scan all project_urls values for a GitHub/GitLab URL regardless of key
-
-    Args:
-        lowercase_urls (dict): Lowercased project URLs
-
-    Returns:
-        str or None
+    Scan all project_urls values for a raw GitHub/GitLab URL candidate
     """
     if not lowercase_urls:
         return None
-    for v in lowercase_urls.values():
-        u = _clean_repo_url(v)
-        if isinstance(u, str) and ("github.com" in u or "gitlab.com" in u):
-            return u
+    for raw_url in lowercase_urls.values():
+        u = _clean_repo_url(raw_url)
+        if isinstance(u, str) and _is_repository_host_url(u):
+            return raw_url
     return None
+
+
+def _resolve_pypi_package_attempt(package_name, logger=None):
+    """
+    Resolve PyPI package to a raw URL attempt
+    """
+    outcome = _make_request_outcome(f"https://pypi.org/pypi/{_pep503_normalize(package_name)}/json", logger)
+    data = outcome["data"]
+    if not data:
+        return {
+            "raw_url": None,
+            "source": URL_RESOLUTION_SOURCE_PYPI_REGISTRY,
+            "reason": outcome["reason"] or URL_RESOLUTION_REASON_NO_DATA_RETURNED,
+        }
+
+    info = _pypi_extract_info(data)
+    lowercase_urls = _pypi_lowercase_urls(info.get("project_urls") or {}, logger, package_name)
+
+    preferred = _pypi_preferred_url_raw(lowercase_urls)
+    if preferred:
+        return {"raw_url": preferred, "source": URL_RESOLUTION_SOURCE_PYPI_REGISTRY, "reason": None}
+
+    homepage = _pypi_home_page_raw(info)
+    if homepage:
+        return {"raw_url": homepage, "source": URL_RESOLUTION_SOURCE_PYPI_REGISTRY, "reason": None}
+
+    any_repo = _pypi_find_any_repo_in_urls_raw(lowercase_urls)
+    if any_repo:
+        return {"raw_url": any_repo, "source": URL_RESOLUTION_SOURCE_PYPI_REGISTRY, "reason": None}
+
+    special = {
+        "vispy": "https://github.com/vispy/vispy",
+    }
+    if package_name in special:
+        return {"raw_url": special[package_name], "source": URL_RESOLUTION_SOURCE_STATIC_RULE, "reason": None}
+
+    return {
+        "raw_url": None,
+        "source": URL_RESOLUTION_SOURCE_PYPI_REGISTRY,
+        "reason": URL_RESOLUTION_REASON_NO_REPOSITORY_URL,
+    }
 
 
 def resolve_pypi_package(package_name, logger=None):
@@ -735,85 +1077,7 @@ def resolve_pypi_package(package_name, logger=None):
     Returns:
         Repository URL string or None if not found
     """
-    data = _pypi_fetch_metadata(package_name, logger)
-    if not data:
-        return None
-
-    info = _pypi_extract_info(data)
-
-    # Prioritize common repo URLs in project_urls
-    lowercase_urls = _pypi_lowercase_urls(info.get("project_urls") or {}, logger, package_name)
-
-    # Prefer explicit repo/source keys first
-    preferred = _pypi_preferred_url(lowercase_urls)
-    if preferred:
-        return preferred
-
-    # Fallback to top-level home_page
-    homepage = _pypi_home_page(info)
-    if homepage:
-        return homepage
-
-    # As a final attempt, scan any project_urls value for a GitHub/GitLab link
-    any_repo = _pypi_find_any_repo_in_urls(lowercase_urls)
-    if any_repo:
-        return any_repo
-
-    # Targeted fallbacks for well-known projects missing metadata on PyPI
-    special = {
-        "vispy": "https://github.com/vispy/vispy",
-    }
-    if package_name in special:
-        return special[package_name]
-
-    return None
-
-
-def _cargo_fetch_metadata(package_name, logger=None):
-    """
-    Fetch crates.io metadata JSON using _make_request
-
-    Args:
-        package_name (str): Crate name
-        logger: Optional logger
-
-    Returns:
-        dict or None
-    """
-    url = f"https://crates.io/api/v1/crates/{package_name}"
-    return _make_request(url, logger)
-
-
-def _cargo_from_repository(crate):
-    """
-    Return cleaned 'repository' URL if present
-
-    Args:
-        crate (dict): Crate metadata
-
-    Returns:
-        str or None
-    """
-    return _clean_repo_url(crate.get("repository")) if crate else None
-
-
-def _cargo_from_homepage(crate):
-    """
-    Return cleaned 'homepage' URL if it matches anchored owner/repo regex
-
-    Args:
-        crate (dict): Crate metadata
-
-    Returns:
-        str or None
-    """
-    if not crate:
-        return None
-    homepage = _clean_repo_url(crate.get("homepage"))
-    if homepage and ("github.com" in homepage or "gitlab.com" in homepage):
-        if re.match(r"https?://(?:www\.)?(?:github|gitlab)\.com/[^/]+/[^/]+/?$", homepage):
-            return homepage
-    return None
+    return _url_from_attempt(_resolve_pypi_package_attempt(package_name, logger))
 
 
 def _cargo_from_documentation(crate):
@@ -841,6 +1105,60 @@ def _cargo_from_documentation(crate):
     return None
 
 
+def _cargo_from_repository_raw(crate):
+    """
+    Return raw 'repository' URL if it can be cleaned
+    """
+    raw_url = crate.get("repository") if crate else None
+    return raw_url if _clean_repo_url(raw_url) else None
+
+
+def _cargo_from_homepage_raw(crate):
+    """
+    Return raw 'homepage' URL if it cleans to an anchored GitHub/GitLab repository
+    """
+    if not crate:
+        return None
+    raw_homepage = crate.get("homepage")
+    homepage = _clean_repo_url(raw_homepage)
+    if homepage and _is_repository_host_url(homepage):
+        return raw_homepage
+    return None
+
+
+def _resolve_cargo_package_attempt(package_name, logger=None):
+    """
+    Resolve Cargo crate to a raw URL attempt
+    """
+    outcome = _make_request_outcome(f"https://crates.io/api/v1/crates/{package_name}", logger)
+    data = outcome["data"]
+    if not data:
+        return {
+            "raw_url": None,
+            "source": URL_RESOLUTION_SOURCE_CRATES_IO,
+            "reason": outcome["reason"] or URL_RESOLUTION_REASON_NO_DATA_RETURNED,
+        }
+
+    crate = data.get("crate", {})
+    repository = _cargo_from_repository_raw(crate)
+    if repository:
+        return {"raw_url": repository, "source": URL_RESOLUTION_SOURCE_CRATES_IO, "reason": None}
+
+    homepage = _cargo_from_homepage_raw(crate)
+    if homepage:
+        return {"raw_url": homepage, "source": URL_RESOLUTION_SOURCE_CRATES_IO, "reason": None}
+
+    inferred = _cargo_from_documentation(crate)
+    if inferred:
+        return {"raw_url": inferred, "source": URL_RESOLUTION_SOURCE_CRATES_IO, "reason": None}
+
+    return {
+        "raw_url": None,
+        "source": URL_RESOLUTION_SOURCE_CRATES_IO,
+        "reason": URL_RESOLUTION_REASON_NO_REPOSITORY_URL,
+    }
+
+
 def resolve_cargo_package(package_name, logger=None):
     """
     Resolve Cargo crate to repository URL
@@ -852,27 +1170,7 @@ def resolve_cargo_package(package_name, logger=None):
     Returns:
         Repository URL string or None if not found
     """
-    data = _cargo_fetch_metadata(package_name, logger)  # User-Agent is handled by helper
-
-    if data:
-        crate = data.get("crate", {})
-
-        # 1. Try repository field
-        repository = _cargo_from_repository(crate)
-        if repository:
-            return repository
-
-        # 2. Try homepage field
-        homepage = _cargo_from_homepage(crate)
-        if homepage:
-            return homepage
-
-        # 3. Try to infer from documentation URL (less reliable)
-        inferred = _cargo_from_documentation(crate)
-        if inferred:
-            return inferred
-
-    return None
+    return _url_from_attempt(_resolve_cargo_package_attempt(package_name, logger))
 
 
 def _go_direct_repo_from_path(package_name):
@@ -885,10 +1183,9 @@ def _go_direct_repo_from_path(package_name):
     Returns:
         str or None: 'https://<host>/<org>/<repo>' or None
     """
-    if "github.com/" in package_name or "gitlab.com/" in package_name:
-        parts = package_name.split("/")
-        if len(parts) >= 3:
-            return f"https://{parts[0]}/{parts[1]}/{parts[2]}"
+    parts = package_name.split("/")
+    if len(parts) >= 3 and parts[0] in {"github.com", "gitlab.com"}:
+        return f"https://{parts[0]}/{parts[1]}/{parts[2]}"
     return None
 
 
@@ -905,47 +1202,67 @@ def _go_meta_tag_fetch_url(package_name):
     return f"https://{package_name}?go-get=1"
 
 
-def _go_meta_tag_repo_url(fetch_url, logger=None):
+def _go_meta_tag_outcome(fetch_url, logger=None):
     """
-    Request page and extract repo URL from go-import meta tag using _RE_GO_IMPORT_META
-    Return cleaned URL or None
-
-    Args:
-        fetch_url (str): Validated URL to fetch
-        logger: Optional logger
-
-    Returns:
-        str or None
+    Fetch Go go-import HTML metadata without JSON registry-domain validation
     """
-    # Use hook if present to fetch HTML content
+    if SECURITY_AVAILABLE:
+        try:
+            fetch_url = InputValidator.validate_url(fetch_url, allowed_schemes={"https"})
+        except ValidationError as e:
+            logger and logger.debug(f"Go package URL validation failed: {fetch_url} - {e}")
+            return {"raw_url": None, "reason": URL_RESOLUTION_REASON_VALIDATION_REJECTED}
+
     if _REQUEST_FN is not None:
         try:
             raw = _REQUEST_FN(fetch_url)
             if raw is None:
-                return None
-            if isinstance(raw, bytes):
-                content = raw.decode("utf-8", errors="ignore")
-            else:
-                content = str(raw)
+                return {"raw_url": None, "reason": URL_RESOLUTION_REASON_NO_DATA_RETURNED}
+            content = raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else str(raw)
             match = _RE_GO_IMPORT_META.search(content)
             if match:
-                repo_url = _clean_repo_url(match.group(3))
-                if repo_url:
-                    return repo_url
-            return None
-        except Exception:
-            return None
+                return {"raw_url": match.group(3), "reason": None}
+            return {"raw_url": None, "reason": URL_RESOLUTION_REASON_NO_DATA_RETURNED}
+        except Exception as e:
+            logger and logger.debug(f"Go package lookup via 'go-get=1' failed for {fetch_url}: {e}")
+            return {"raw_url": None, "reason": URL_RESOLUTION_REASON_NETWORK_ERROR}
 
     req = urllib.request.Request(fetch_url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-        if response.status == 200:
-            content = response.read().decode("utf-8", errors="ignore")
-            match = _RE_GO_IMPORT_META.search(content)
-            if match:
-                repo_url = _clean_repo_url(match.group(3))
-                if repo_url:
-                    return repo_url
-    return None
+    try:
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+            if response.status == 200:
+                content = response.read().decode("utf-8", errors="ignore")
+                match = _RE_GO_IMPORT_META.search(content)
+                if match:
+                    return {"raw_url": match.group(3), "reason": None}
+            if response.status == 404:
+                return {"raw_url": None, "reason": URL_RESOLUTION_REASON_NO_DATA_RETURNED}
+            return {"raw_url": None, "reason": URL_RESOLUTION_REASON_NETWORK_ERROR}
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {"raw_url": None, "reason": URL_RESOLUTION_REASON_NO_DATA_RETURNED}
+        logger and logger.debug(f"Go package lookup via 'go-get=1' failed for {fetch_url}: {e}")
+        return {"raw_url": None, "reason": URL_RESOLUTION_REASON_NETWORK_ERROR}
+    except Exception as e:
+        logger and logger.debug(f"Go package lookup via 'go-get=1' failed for {fetch_url}: {e}")
+        return {"raw_url": None, "reason": URL_RESOLUTION_REASON_NETWORK_ERROR}
+
+
+def _resolve_go_package_attempt(package_name, logger=None):
+    """
+    Resolve Go package to a raw URL attempt
+    """
+    direct = _go_direct_repo_from_path(package_name)
+    if direct:
+        return {"raw_url": direct, "source": URL_RESOLUTION_SOURCE_GO_IMPORT_PATH, "reason": None}
+
+    fetch_url = _go_meta_tag_fetch_url(package_name)
+    outcome = _go_meta_tag_outcome(fetch_url, logger)
+    return {
+        "raw_url": outcome["raw_url"],
+        "source": URL_RESOLUTION_SOURCE_GO_GET_META,
+        "reason": outcome["reason"] or URL_RESOLUTION_REASON_NO_DATA_RETURNED,
+    }
 
 
 def resolve_go_package(package_name, logger=None):
@@ -959,32 +1276,35 @@ def resolve_go_package(package_name, logger=None):
     Returns:
         Repository URL string or None if not found
     """
-    # For Go packages, the import path often IS the repo URL path
-    direct = _go_direct_repo_from_path(package_name)
-    if direct:
-        return direct
+    return _url_from_attempt(_resolve_go_package_attempt(package_name, logger))
 
-    # Attempting the go-get=1 meta tag approach
-    try:
-        fetch_url = _go_meta_tag_fetch_url(package_name)
 
-        # Validate URL for security
-        if SECURITY_AVAILABLE:
-            try:
-                validated_url = InputValidator.validate_url(fetch_url, allowed_schemes={"https"})
-                fetch_url = validated_url
-            except ValidationError as e:
-                logger and logger.debug(f"Go package URL validation failed: {fetch_url} - {e}")
-                return None
+def _resolve_solidity_contract_attempt(package_name, source=None, logger=None):
+    """
+    Resolve Solidity contract/library to a raw URL attempt from a source hint
+    """
+    if source:
+        cleaned_source = _clean_repo_url(source)
+        if cleaned_source and _is_repository_host_url(cleaned_source):
+            return {"raw_url": source, "source": URL_RESOLUTION_SOURCE_SOLIDITY_SOURCE_HINT, "reason": None}
 
-        inferred = _go_meta_tag_repo_url(fetch_url, logger)
-        if inferred:
-            return inferred
-    except Exception as e:
-        logger and logger.debug(f"Go package lookup via 'go-get=1' failed for {package_name}: {e}")
-        pass
+    logger and logger.debug(f"No direct source hint or specific resolver for Solidity package: {package_name}")
+    return {
+        "raw_url": None,
+        "source": URL_RESOLUTION_SOURCE_SOLIDITY_SOURCE_HINT,
+        "reason": URL_RESOLUTION_REASON_NO_REPOSITORY_URL,
+    }
 
-    return None  # If direct URL and go-get meta tag failed
+
+def _resolve_solidity_package_attempts(package_name, package_data, logger=None):
+    """
+    Resolve Solidity package through npm when appropriate, then source hints
+    """
+    attempts = []
+    if not _is_solidity_alias_like(package_name):
+        attempts.append(_resolve_npm_package_attempt(package_name, logger))
+    attempts.append(_resolve_solidity_contract_attempt(package_name, package_data.get("source"), logger))
+    return attempts
 
 
 def resolve_solidity_contract(package_name, source=None, logger=None):
@@ -999,14 +1319,4 @@ def resolve_solidity_contract(package_name, source=None, logger=None):
     Returns:
         Repository URL string or None if not found
     """
-    # If source is provided (e.g., from foundry.toml), use it
-    # 1. Use source hint if provided and valid
-    if source:
-        cleaned_source = _clean_repo_url(source)
-        if cleaned_source and ("github.com" in cleaned_source or "gitlab.com" in cleaned_source):
-            return cleaned_source
-
-    # 2. Placeholder for future Etherscan/Sourcegraph/etc. API integration
-    # For now, we rely on npm resolution which is attempted earlier in resolve_package_urls
-    logger and logger.debug(f"No direct source hint or specific resolver for Solidity package: {package_name}")
-    return None
+    return _url_from_attempt(_resolve_solidity_contract_attempt(package_name, source, logger))

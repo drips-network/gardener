@@ -24,5 +24,7 @@ def test_solidity_aliases_canonicalized(tmp_path):
 
     pkgs = results["external_packages"]
     assert "@openzeppelin/contracts" in pkgs
+    assert pkgs["@openzeppelin/contracts"]["repository_url_resolution"]["source"] == "cache"
+    assert pkgs["@openzeppelin/contracts"]["repository_url_resolution"]["cache"] == "hit"
     assert "@openzeppelin" not in pkgs
     assert "@openzeppelin/" not in pkgs

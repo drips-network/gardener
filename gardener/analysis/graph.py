@@ -377,6 +377,9 @@ class DependencyGraphBuilder:
                 is_package_manager=True,
                 repository_url=pkg_data.get("repository_url", ""),
             )
+            repository_url_resolution = pkg_data.get("repository_url_resolution")
+            if isinstance(repository_url_resolution, dict):
+                classification["url_resolution_status"] = repository_url_resolution["status"]
             self._create_package_node(
                 G,
                 dist_name,
@@ -481,6 +484,9 @@ class DependencyGraphBuilder:
             is_package_manager=True,
             repository_url=self.external_packages[package_name].get("repository_url", ""),
         )
+        repository_url_resolution = self.external_packages[package_name].get("repository_url_resolution")
+        if isinstance(repository_url_resolution, dict):
+            classification["url_resolution_status"] = repository_url_resolution["status"]
         self._create_package_node(
             G,
             node_id_to_add,
