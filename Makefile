@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 PYTHON ?= python3
 
-.PHONY: help dev-install dev-install-service js-helpers test compile-service-reqs compile-dev-reqs token lint type format validate
+.PHONY: help dev-install dev-install-service js-helpers test test-system compile-service-reqs compile-dev-reqs token lint type format validate
 
 help:
 	@echo "Targets:"
@@ -11,6 +11,7 @@ help:
 	@echo "  test                   Run test suite via pytest"
 	@echo "                        Pass args with PYTEST_ARGS or ARGS, e.g.:"
 	@echo "                        make test PYTEST_ARGS=\"-k unit -v\""
+	@echo "  test-system            Run API/worker tests with service dependencies"
 	@echo "  compile-service-reqs   Compile pinned requirements for service image (services/requirements.txt)"
 	@echo "  compile-dev-reqs       Compile pinned dev/test requirements (requirements-dev.lock)"
 	@echo "  token                  Generate HMAC token (set HMAC_SHARED_SECRET and REPO_URL)"
@@ -31,7 +32,10 @@ js-helpers:
 	cd gardener/external_helpers/hardhat_config_parser && npm ci --omit=dev
 
 test:
-	pytest -q $(PYTEST_ARGS) $(ARGS)
+	uv run --extra test pytest -q $(PYTEST_ARGS) $(ARGS)
+
+test-system:
+	uv run --extra service --extra test pytest -q -m system $(PYTEST_ARGS) $(ARGS)
 
 compile-service-reqs:
 	uv pip compile pyproject.toml -o services/requirements.txt --extra service
