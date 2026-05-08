@@ -4,6 +4,7 @@ import re
 import pytest
 
 from gardener.analysis import evidence
+from gardener.analysis.main import DependencyAnalyzer
 from gardener.analysis.evidence import (
     ANALYSIS_SCHEMA_VERSION,
     DEPENDENCY_KIND_BUILTIN,
@@ -21,6 +22,7 @@ from gardener.analysis.evidence import (
     graph_digest,
 )
 from gardener.common.defaults import ConfigOverride
+from gardener.package_metadata.url_resolution import ensure_repository_url_resolution
 
 
 @pytest.mark.unit
@@ -203,7 +205,137 @@ def test_dependency_classification_for_package_manager_and_unknown_dependencies(
     assert enriched["zod"]["dependency_kind"] == DEPENDENCY_KIND_PACKAGE_MANAGER
     assert enriched["zod"]["normalized_name"] == "zod"
     assert enriched["zod"]["url_resolution_status"] == "resolved"
+    assert enriched["zod"]["repository_url_resolution"]["source"] == "provided"
+    assert enriched["left-pad"]["repository_url"] == ""
     assert enriched["left-pad"]["url_resolution_status"] == "unresolved"
+    assert enriched["left-pad"]["repository_url_resolution"]["reason"] == "resolution-not-recorded"
+
+
+@pytest.mark.unit
+def test_provided_repository_url_is_sanitized_before_evidence_output():
+    package_info = ensure_repository_url_resolution(
+        {"ecosystem": "npm", "repository_url": "https://user:token@github.com/owner/repo.git"},
+        checked_at="2026-05-08T12:00:00Z",
+    )
+
+    assert package_info["repository_url"] == "https://github.com/owner/repo"
+    assert package_info["repository_url_resolution"] == {
+        "status": "resolved",
+        "source": "provided",
+        "cache": "not-used",
+        "normalized": True,
+        "checked_at": "2026-05-08T12:00:00Z",
+    }
+
+
+@pytest.mark.unit
+def test_provided_repository_url_strips_query_and_fragment_before_evidence_output():
+    package_info = ensure_repository_url_resolution(
+        {"repository_url": "https://github.com/owner/repo.git?access_token=secret#frag"},
+        checked_at="2026-05-08T12:00:00Z",
+    )
+
+    assert package_info["repository_url"] == "https://github.com/owner/repo"
+    assert package_info["repository_url_resolution"]["normalized"] is True
+    assert "access_token" not in str(package_info)
+    assert "frag" not in str(package_info)
+
+
+@pytest.mark.unit
+def test_provided_repository_url_parse_failure_does_not_persist_original_secret():
+    package_info = ensure_repository_url_resolution(
+        {"repository_url": "https://[github.com/owner/repo?access_token=secret"},
+        checked_at="2026-05-08T12:00:00Z",
+    )
+
+    assert package_info["repository_url"] == ""
+    assert package_info["repository_url_resolution"]["status"] == "unresolved"
+    assert package_info["repository_url_resolution"]["reason"] == "normalization-failed"
+    assert package_info["repository_url_resolution"]["normalized"] is True
+    assert "access_token" not in str(package_info)
+
+
+@pytest.mark.unit
+def test_sanitized_empty_url_rewrites_existing_resolved_receipt():
+    package_info = ensure_repository_url_resolution(
+        {
+            "repository_url": "https://[github.com/owner/repo?access_token=secret",
+            "repository_url_resolution": {
+                "status": "resolved",
+                "source": "npm-registry",
+                "cache": "hit",
+                "normalized": False,
+                "checked_at": "2026-05-08T11:00:00Z",
+            },
+        },
+        checked_at="2026-05-08T12:00:00Z",
+    )
+
+    assert package_info["repository_url"] == ""
+    assert package_info["repository_url_resolution"] == {
+        "status": "unresolved",
+        "source": "npm-registry",
+        "cache": "hit",
+        "normalized": True,
+        "checked_at": "2026-05-08T11:00:00Z",
+        "reason": "normalization-failed",
+    }
+    assert "access_token" not in str(package_info)
+
+
+@pytest.mark.unit
+def test_sanitized_empty_url_uses_canonical_receipt_defaults():
+    package_info = ensure_repository_url_resolution(
+        {
+            "repository_url": "https://[github.com/owner/repo?access_token=secret",
+            "repository_url_resolution": {
+                "status": "resolved",
+                "source": None,
+                "cache": None,
+                "normalized": False,
+                "checked_at": "2026-05-08T11:00:00Z",
+            },
+        },
+        checked_at="2026-05-08T12:00:00Z",
+    )
+
+    assert package_info["repository_url_resolution"]["source"] == "provided"
+    assert package_info["repository_url_resolution"]["cache"] == "not-used"
+    assert package_info["repository_url_resolution"]["reason"] == "normalization-failed"
+
+
+@pytest.mark.unit
+def test_direct_analyze_dependencies_does_not_leak_url_secret_components():
+    class FakeRepoAnalyzer:
+        source_files = {"main.js": {"language": "javascript"}}
+        file_imports = {"main.js": ["zod"]}
+        file_package_components = {}
+        local_imports_map = {}
+        root_package_names = set()
+
+        def extract_imports_from_all_files(self):
+            pass
+
+    analyzer = DependencyAnalyzer()
+    analyzer.repo_analyzer = FakeRepoAnalyzer()
+    results = analyzer.analyze_dependencies(
+        {
+            "zod": {
+                "ecosystem": "npm",
+                "import_names": ["zod"],
+                "repository_url": "https://user:token@github.com/owner/repo.git?access_token=secret#frag",
+            }
+        },
+        invocation_metadata={"entrypoint": "test"},
+    )
+    summary = build_machine_summary(results)
+
+    assert results["external_packages"]["zod"]["repository_url"] == "https://github.com/owner/repo"
+    assert results["dependency_graph"]["nodes"]
+    assert "user:token" not in str(results)
+    assert "access_token" not in str(results)
+    assert "frag" not in str(results)
+    assert "access_token" not in str(summary)
 
 
 @pytest.mark.unit
@@ -339,6 +471,13 @@ def test_machine_summary_projects_enriched_analysis_result_in_dependency_order()
                 "runtime": None,
                 "normalized_name": "zod",
                 "url_resolution_status": "resolved",
+                "repository_url_resolution": {
+                    "status": "resolved",
+                    "source": "npm-registry",
+                    "cache": "miss",
+                    "normalized": True,
+                    "checked_at": "2026-05-08T12:00:00Z",
+                },
             },
             {
                 "package_name": "fs",
@@ -379,7 +518,13 @@ def test_machine_summary_projects_enriched_analysis_result_in_dependency_order()
             "runtime": None,
             "normalized_name": "zod",
             "repository_url": "https://github.com/colinhacks/zod",
-            "url_resolution": {"status": "resolved"},
+            "url_resolution": {
+                "status": "resolved",
+                "source": "npm-registry",
+                "cache": "miss",
+                "normalized": True,
+                "checked_at": "2026-05-08T12:00:00Z",
+            },
             "centrality": {"metric": "pagerank", "percentage": 80.0, "score": 0.08},
             "evidence_ref": "top_dependencies[0]",
         },
@@ -395,6 +540,20 @@ def test_machine_summary_projects_enriched_analysis_result_in_dependency_order()
             "evidence_ref": "top_dependencies[1]",
         },
     ]
+
+
+@pytest.mark.unit
+def test_machine_summary_synthesizes_full_receipt_for_package_manager_without_receipt():
+    analysis_result = _valid_summary_analysis_result()
+
+    summary = build_machine_summary(analysis_result)
+
+    url_resolution = summary["dependencies"][0]["url_resolution"]
+    assert url_resolution["status"] == "resolved"
+    assert url_resolution["source"] == "provided"
+    assert url_resolution["cache"] == "not-used"
+    assert url_resolution["normalized"] is False
+    assert "checked_at" in url_resolution
 
 
 @pytest.mark.unit

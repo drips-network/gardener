@@ -670,6 +670,13 @@ def test_package_and_unmanaged_nodes_include_evidence_metadata(graph_builder, lo
             "ecosystem": "npm",
             "import_names": ["zod"],
             "repository_url": "https://github.com/colinhacks/zod",
+            "repository_url_resolution": {
+                "status": "resolved",
+                "source": "npm-registry",
+                "cache": "miss",
+                "normalized": True,
+                "checked_at": "2026-05-08T12:00:00Z",
+            },
         }
     }
     file_imports = {"main.js": ["zod", "path", "node:path", "not-a-core-module"]}
@@ -693,11 +700,13 @@ def test_package_and_unmanaged_nodes_include_evidence_metadata(graph_builder, lo
     assert zod_node["normalized_name"] == "zod"
     assert zod_node["repository_url"] == "https://github.com/colinhacks/zod"
     assert zod_node["url_resolution_status"] == "resolved"
+    assert "repository_url_resolution" not in zod_node
 
     component_node = graph.nodes["zod.object"]
     assert component_node["dependency_kind"] == DEPENDENCY_KIND_PACKAGE_MANAGER
     assert component_node["normalized_name"] == "zod"
     assert component_node["repository_url"] == "https://github.com/colinhacks/zod"
+    assert "repository_url_resolution" not in component_node
 
     for node_id in ("path", "node:path"):
         node = graph.nodes[node_id]

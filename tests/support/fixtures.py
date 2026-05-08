@@ -40,7 +40,12 @@ def offline_mode():
             self._responses = dict(mapping or {})
 
             def _hook(url):
-                return self._responses.get(url)
+                response = self._responses.get(url)
+                if callable(response):
+                    return response(url)
+                if isinstance(response, Exception):
+                    raise response
+                return response
 
             url_resolver.set_request_fn(_hook)
             try:

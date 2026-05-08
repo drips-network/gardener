@@ -17,7 +17,8 @@ from gardener.analysis.graph import DependencyGraphBuilder
 from gardener.analysis.tree import RepositoryAnalyzer
 from gardener.common.defaults import ConfigOverride, GraphAnalysisConfig as cfg, apply_config_overrides
 from gardener.common.utils import Logger, get_repo
-from gardener.package_metadata.url_resolver import resolve_package_urls
+from gardener.package_metadata.url_resolution import ensure_repository_url_resolution, utc_now_isoformat
+from gardener.package_metadata.url_resolver import resolve_package_url_receipts
 from gardener.persistence.file import FilePersistence
 from gardener.treewalk.go import GoLanguageHandler
 from gardener.treewalk.javascript import JavaScriptLanguageHandler
@@ -154,17 +155,21 @@ class DependencyAnalyzer:
             percentage = (score / total_score * 100) if total_score > 0 else 0
             repository_url = ""
             ecosystem = "unknown"
+            repository_url_resolution = None
 
             if package_name in self.repo_analyzer.external_packages:
                 package_data = self.repo_analyzer.external_packages[package_name]
                 repository_url = package_data.get("repository_url", "")
                 ecosystem = package_data.get("ecosystem", "unknown")
+                repository_url_resolution = package_data.get("repository_url_resolution")
                 classification = classify_dependency_fact(
                     package_name,
                     ecosystem=ecosystem,
                     is_package_manager=True,
                     repository_url=repository_url,
                 )
+                if isinstance(repository_url_resolution, dict):
+                    classification["url_resolution_status"] = repository_url_resolution["status"]
             elif self.graph_builder.graph and self.graph_builder.graph.has_node(package_name):
                 graph_node = self.graph_builder.graph.nodes[package_name]
                 repository_url = graph_node.get("repository_url", "")
@@ -178,16 +183,17 @@ class DependencyAnalyzer:
             else:
                 classification = classify_dependency_fact(package_name, ecosystem=ecosystem)
 
-            top_deps.append(
-                {
-                    "package_name": package_name,
-                    "percentage": percentage,
-                    "score": score,
-                    "package_url": repository_url,
-                    "ecosystem": ecosystem,
-                    **classification,
-                }
-            )
+            dependency = {
+                "package_name": package_name,
+                "percentage": percentage,
+                "score": score,
+                "package_url": repository_url,
+                "ecosystem": ecosystem,
+                **classification,
+            }
+            if isinstance(repository_url_resolution, dict):
+                dependency["repository_url_resolution"] = repository_url_resolution
+            top_deps.append(dependency)
         return top_deps
 
     def _assemble_results(self, graph, top_deps):
@@ -243,8 +249,12 @@ class DependencyAnalyzer:
         if not self.repo_analyzer:
             raise RuntimeError("discover_packages must be called before analyze_dependencies")
 
-        # Update the repo_analyzer's external_packages with the resolved URLs
-        self.repo_analyzer.external_packages = external_packages_with_urls
+        # Update the repo_analyzer's external_packages with the resolved URLs and receipts
+        checked_at = utc_now_isoformat()
+        self.repo_analyzer.external_packages = {
+            package_name: ensure_repository_url_resolution(package_data, checked_at=checked_at)
+            for package_name, package_data in external_packages_with_urls.items()
+        }
 
         # Extract imports from files
         self.repo_analyzer.extract_imports_from_all_files()
@@ -275,18 +285,14 @@ class DependencyAnalyzer:
             Dict of external_packages with 'repository_url' keys ensured
         """
         self.logger.info("... Resolving repository URLs for external packages")
-        try:
-            resolved_urls = resolve_package_urls(external_packages, self.logger, cache=url_cache)
-            for package_name, url in resolved_urls.items():
-                if package_name in external_packages:
-                    external_packages[package_name]["repository_url"] = url
-            for package_name in external_packages:
-                if "repository_url" not in external_packages[package_name]:
-                    external_packages[package_name]["repository_url"] = ""
-        except Exception as e:
-            self.logger.warning(f"Error during bulk URL resolution: {e}")
-            for package_name in external_packages:
-                external_packages[package_name].setdefault("repository_url", "")
+        resolution_entries = resolve_package_url_receipts(external_packages, self.logger, cache=url_cache)
+        for package_name, package_data in external_packages.items():
+            resolution_entry = resolution_entries.get(package_name)
+            if resolution_entry:
+                package_data["repository_url"] = resolution_entry["repository_url"]
+                package_data["repository_url_resolution"] = resolution_entry["repository_url_resolution"]
+            else:
+                external_packages[package_name] = ensure_repository_url_resolution(package_data)
         return external_packages
 
     def analyze(
