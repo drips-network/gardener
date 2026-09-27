@@ -309,7 +309,7 @@ def _append_unique(values, value):
         values.append(value)
 
 
-def attach_import_names(external_packages, secure_file_ops, logger):
+def attach_import_names(external_packages, secure_file_ops, logger, python_environment=None):
     """
     Attach import names for known ecosystems
 
@@ -317,21 +317,31 @@ def attach_import_names(external_packages, secure_file_ops, logger):
         external_packages (dict): Package metadata map keyed by distribution name
         secure_file_ops (SecureFileOps|None): Secure file operations or None
         logger (Logger|None): Optional logger
+        python_environment (PythonEnvironment|None): Explicitly selected installed metadata
 
     Returns:
         dict: Package metadata map with `import_names` populated
     """
     resolvers = {
-        "pypi": PythonResolver,
         "go": GoResolver,
         "cargo": RustResolver,
         "npm": JsonManifestResolver,
     }
 
+    python_resolver = PythonResolver(secure_file_ops, python_environment)
     for dist_name, metadata in external_packages.items():
         if "import_names" in metadata:
             continue
         ecosystem = metadata.get("ecosystem")
+        if ecosystem == "pypi":
+            names, receipt = python_resolver.resolve_import_names(
+                dist_name, metadata["found_in_manifests"], logger
+            )
+            metadata["import_names"] = names
+            metadata["import_name_resolution"] = receipt
+            if logger:
+                logger.debug(f"Python import names for {dist_name}: {receipt}")
+            continue
         resolver_cls = resolvers.get(ecosystem)
         if resolver_cls:
             resolver = resolver_cls(secure_file_ops=secure_file_ops)

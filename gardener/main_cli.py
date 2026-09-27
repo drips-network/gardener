@@ -13,6 +13,7 @@ import sys
 from gardener.analysis.main import run_analysis
 from gardener.analysis.scopes import parse_scope_filter
 from gardener.common.utils import Logger, RepositoryError
+from gardener.package_metadata.name_resolvers.python_metadata import PythonEnvironment, PythonEnvironmentError
 
 
 def main():
@@ -51,12 +52,20 @@ def main():
     )
     parser.add_argument("--scope", help="Comma-separated scopes to include, or all")
     parser.add_argument("--exclude-scope", help="Comma-separated scopes to exclude")
+    parser.add_argument("--python-env", metavar="PATH", help="Read Python import names from this environment first")
     args = parser.parse_args()
 
     try:
         scope_filter = parse_scope_filter(args.scope, args.exclude_scope)
     except ValueError as exc:
         parser.error(str(exc))
+
+    python_environment = None
+    if args.python_env:
+        try:
+            python_environment = PythonEnvironment(args.python_env, logger)
+        except PythonEnvironmentError as exc:
+            parser.error(str(exc))
 
     config_overrides = None
     if args.config:
@@ -88,6 +97,7 @@ def main():
             config_overrides,
             machine_summary=args.machine_summary,
             scope_filter=scope_filter,
+            python_environment=python_environment,
         )
     except RepositoryError as e:
         logger.error(str(e))

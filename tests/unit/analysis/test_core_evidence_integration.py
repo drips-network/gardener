@@ -4,9 +4,11 @@ Focused integration tests for core evidence metadata wiring
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
+from gardener import main_cli
 from gardener.analysis import main as analysis_main
 from gardener.analysis.evidence import ANALYSIS_SCHEMA_VERSION, MACHINE_SUMMARY_SCHEMA_VERSION
 from gardener.analysis.main import run_analysis
@@ -107,3 +109,72 @@ def test_run_analysis_sanitizes_remote_repository_input_metadata(tmp_path, monke
 
     assert results["repository"]["input"] == "https://github.com/example/repo.git"
     assert results["repository"]["resolved_path"] is None
+
+
+@pytest.mark.integration
+def test_cli_persists_environment_and_locked_import_evidence(tmp_path, monkeypatch, fake_pypi, offline_mode):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "requirements.txt").write_text("PyYAML\nrequests\n")
+    (repo / "app.py").write_text("import yaml\nimport requests\n")
+    (repo / "uv.lock").write_text(
+        '[[package]]\nname="requests"\nversion="1"\nsource={registry="https://pypi.org/simple"}\n'
+        '[[package]]\nname="transitive"\nversion="1"\nsource={registry="https://pypi.org/simple"}\n'
+    )
+    metadata = tmp_path / "env/lib/python3.11/site-packages/pyyaml-6.dist-info"
+    metadata.mkdir(parents=True)
+    (metadata / "top_level.txt").write_text("yaml\n_yaml\n")
+    locked_url = fake_pypi.add_release("requests", "1", {"p.dist-info/top_level.txt": "requests"})
+    latest_url = fake_pypi.add_release("requests", "2", {"p.dist-info/top_level.txt": "wrong"})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["gardener", str(repo), "--python-env", "env", "-o", "evidence"])
+    with offline_mode.set_responses({}):
+        main_cli.main()
+
+    results = json.loads((tmp_path / "output/evidence_dependency_analysis.json").read_text())
+    packages = results["external_packages"]
+    assert packages["PyYAML"]["import_names"] == ["_yaml", "yaml"]
+    assert packages["PyYAML"]["import_name_resolution"] == {
+        "source": "installed-environment", "versions": ["6"], "lockfiles": [],
+    }
+    assert packages["requests"]["import_name_resolution"] == {
+        "source": "pypi:locked-version", "versions": ["1"], "lockfiles": ["uv.lock"],
+    }
+    assert "transitive" not in packages
+    edges = {(edge["source"], edge["target"]) for edge in results["dependency_graph"]["links"]}
+    assert ("app.py", "PyYAML") in edges
+    assert ("app.py", "requests") in edges
+    assert fake_pypi.requested_urls == ["https://pypi.org/pypi/requests/json", locked_url]
+    assert latest_url not in fake_pypi.requested_urls
+
+
+@pytest.mark.integration
+def test_unsearchable_environment_exits_two_before_analysis(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "env"
+    root.mkdir()
+    original_is_dir = Path.is_dir
+
+    def denied_layout(path):
+        if path == root / "lib":
+            raise PermissionError("layout is not searchable")
+        return original_is_dir(path)
+
+    monkeypatch.setattr(Path, "is_dir", denied_layout)
+    monkeypatch.setattr("sys.argv", ["gardener", str(tmp_path), "--python-env", str(root)])
+    with pytest.raises(SystemExit) as error:
+        main_cli.main()
+    assert error.value.code == 2
+    assert "layout is not searchable" in capsys.readouterr().err
+
+
+@pytest.mark.integration
+def test_cli_invalid_environment_fails_before_analysis(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv", ["gardener", str(tmp_path / "missing-repo"), "--python-env", "missing-env"]
+    )
+    with pytest.raises(SystemExit) as error:
+        main_cli.main()
+    assert error.value.code == 2
+    assert "Cannot read Python environment" in capsys.readouterr().err
+    assert not (tmp_path / "output").exists()
