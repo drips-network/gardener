@@ -79,6 +79,16 @@ Scopes are deterministic path heuristics identified by classifier `path-heuristi
 
 URL-resolution `source` values identify where the evidence came from, such as `cache`, `gitmodules`, `npm-registry`, `pypi-registry`, `crates-io`, `go-import-path`, `go-get-meta`, `solidity-source-hint`, `static-rule`, `provided`, or `not-recorded`. Cache values are `hit`, `miss`, or `not-used`. Unresolved reasons include registry/no-data conditions, validation rejection, normalization failure, unsupported ecosystems, resolver errors, and externally provided package data without recorded resolution.
 
+### Python import-name resolution
+
+Use `--python-env PATH` to select an installed environment, for example `python -m gardener.main_cli /path/to/repo --python-env /path/to/repo/.venv`. Relative environment paths are resolved from the current working directory. The environment must contain one `lib/python3.*/site-packages` or `Lib/site-packages` directory. Gardener reads contained `.dist-info` metadata statically, preferring `top_level.txt` over `RECORD`. Installed names take priority over lockfiles and avoid PyPI requests for those import names. Repository-URL resolution has its own network requests.
+
+For each declaring manifest, Gardener searches its directory and ancestors up to the repository root for `uv.lock`, `poetry.lock`, or `pylock.toml`. The first directory containing any of these files supplies the locks. When several locked versions apply, Gardener combines their import names and records every inspected version. This represents dependencies across the repository, rather than selecting a particular Python runtime. Lockfiles provide versions for packages discovered from manifests.
+
+The full JSON's Python package entries contain `import_name_resolution` with `source`, `versions`, and `lockfiles`. Sources are `installed-environment`, `pypi:locked-version`, `pypi:latest`, and `name-guess`. Versions identify the releases that supplied the returned names. Lockfile paths identify owners containing the package, or unreadable owners when resolution fails. They are repository-relative; environment and latest-release receipts have an empty list.
+
+When installed metadata is unavailable, resolution continues through lockfiles and PyPI. Latest PyPI is used when no lock entry exists. Poetry's omitted source and pylock's omitted index are treated as the default registry; explicit alternate registries and direct sources produce labeled guesses. Unreadable locks and failed PyPI lookups also produce guesses, with empty `versions` and a `reason`: `lockfile-unreadable`, `lock-entry-not-pypi-release`, or `pypi-metadata-unavailable`. Successful metadata supplies the complete list of names. Namespace packages share their top-level name, and editable-install metadata may expose only installation helpers.
+
 ## Architecture
 
 ```text

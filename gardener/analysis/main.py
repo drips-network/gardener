@@ -36,19 +36,24 @@ class DependencyAnalyzer:
     This class is persistence-agnostic and returns pure data structures
     """
 
-    def __init__(self, verbose=False, *, repository_metadata=None, invocation_metadata=None, scope_filter=None):
+    def __init__(
+        self, verbose=False, *, repository_metadata=None, invocation_metadata=None,
+        scope_filter=None, python_environment=None,
+    ):
         """
         Args:
             verbose (bool): Enable verbose logging
             repository_metadata (dict | None): Repository provenance metadata
             invocation_metadata (dict | None): Invocation provenance metadata
             scope_filter (ScopeFilter | None): Scope filter controlling active evidence inputs
+            python_environment (PythonEnvironment | None): Explicitly selected installed metadata
         """
         self.verbose = verbose
         self.logger = Logger(verbose=verbose)
         self.repository_metadata = repository_metadata
         self.invocation_metadata = invocation_metadata
         self.scope_filter = scope_filter or ScopeFilter.all()
+        self.python_environment = python_environment
 
         # Initialize components that persist across analysis phases
         self.repo_analyzer = None
@@ -96,6 +101,7 @@ class DependencyAnalyzer:
             specific_languages,
             self.logger,
             scope_filter=self.scope_filter,
+            python_environment=self.python_environment,
         )
         self._register_language_handlers()
         return self._scan_and_process_manifests()
@@ -371,6 +377,7 @@ def analyze_repository(
     repository_metadata=None,
     invocation_metadata=None,
     scope_filter=None,
+    python_environment=None,
 ):
     """
     Convenience function to analyze a repository
@@ -393,6 +400,7 @@ def analyze_repository(
         repository_metadata=repository_metadata,
         invocation_metadata=invocation_metadata,
         scope_filter=scope_filter,
+        python_environment=python_environment,
     )
     # Prefer scoped overrides when provided to avoid global mutation during tests
     if overrides:
@@ -636,6 +644,8 @@ def run_analysis(
     persistence=None,
     machine_summary=False,
     scope_filter=None,
+    *,
+    python_environment=None,
 ):
     """
     Run the full dependency analysis with the specified persistence backend
@@ -649,6 +659,7 @@ def run_analysis(
         config_overrides (dict): Optional dictionary of configuration parameter overrides
         persistence (object): Persistence backend to use (defaults to FilePersistence)
         machine_summary (bool): Whether to persist the compact machine summary sidecar
+        python_environment (PythonEnvironment | None): Explicitly selected installed metadata
 
     Returns:
         Dict of analysis results
@@ -690,6 +701,7 @@ def run_analysis(
             repository_metadata=repository_metadata,
             invocation_metadata=invocation_metadata,
             scope_filter=scope_filter,
+            python_environment=python_environment,
         )
 
         output_prefix = _determine_output_prefix(abs_path, output_prefix)

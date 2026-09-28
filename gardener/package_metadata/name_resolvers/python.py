@@ -6,11 +6,38 @@ import io
 import re
 import tarfile
 import zipfile
+from pathlib import Path
+from typing import Literal, TypedDict
 
 import requests
 
-from gardener.common.secure_file_ops import FileOperationError
+from gardener.common.secure_file_ops import FileOperationError, SecurityError
+from gardener.common.utils import Logger
 from gardener.package_metadata.name_resolvers.base import BaseResolver
+from gardener.package_metadata.name_resolvers.python_metadata import (
+    PYTHON_LOCKFILE_NAMES,
+    ImportNames,
+    LockEntry,
+    PythonEnvironment,
+    normalize_distribution_name,
+    parse_python_lockfile,
+)
+
+
+class MetadataResolution(TypedDict):
+    """Sources and release versions that supplied the returned import names"""
+    source: Literal["installed-environment", "pypi:locked-version", "pypi:latest"]
+    versions: list[str]
+    lockfiles: list[str]
+
+
+class GuessResolution(TypedDict):
+    """Version-independent names with the reason metadata could not be used"""
+    source: Literal["name-guess"]
+    versions: list[str]
+    lockfiles: list[str]
+    reason: str
+
 
 
 class PythonResolver(BaseResolver):
@@ -21,12 +48,16 @@ class PythonResolver(BaseResolver):
     by analyzing package metadata and contents
     """
 
-    def __init__(self, secure_file_ops=None):
+    def __init__(self, secure_file_ops=None, python_environment: PythonEnvironment | None = None):
         """
         Args:
             secure_file_ops (object): Optional SecureFileOps instance for safe file operations
+            python_environment (PythonEnvironment | None): Explicitly selected static metadata source
         """
         super().__init__(secure_file_ops)
+        self.python_environment = python_environment
+        self._lockfiles_by_directory: dict[Path, tuple[str, ...]] = {}
+        self._lock_entries_by_lockfile: dict[str, dict[str, set[LockEntry]] | None] = {}
 
     def resolve_from_manifest(self, manifest_path, logger=None, packages=None, **kwargs):
         """
@@ -165,51 +196,98 @@ class PythonResolver(BaseResolver):
         Returns:
             list: List of possible import names for the package
         """
-        # First use the direct mapping approach
-        import_names = self._process_distribution_name(package_name)
+        return self._resolve_from_pypi(package_name, [version] if version else [], [], logger)[0]
 
-        # Also use PyPI metadata
-        try:
-            pypi_names = resolve_python_import_names(package_name, version, logger)
-            if pypi_names:
-                import_names.extend(pypi_names)
-        except Exception as e:
-            # Log but continue with what we have
+    def resolve_import_names(
+        self, package_name: str, declaring_manifests: list[str], logger: Logger | None = None,
+    ) -> tuple[list[str], MetadataResolution | GuessResolution]:
+        """Resolve environment or owning-lock metadata; requires repository-bound file access"""
+        if self.python_environment is not None:
+            installed = self.python_environment.installed_import_names(package_name)
+            if installed is not None:
+                receipt: MetadataResolution = {
+                    "source": "installed-environment", "versions": [installed.version], "lockfiles": [],
+                }
+                return list(installed.names), receipt
+
+        owning: set[str] = set()
+        for manifest in declaring_manifests:
+            owning.update(self._owning_lockfiles(Path(manifest).parent))
+
+        unreadable = []
+        matching = []
+        locked_entries: set[LockEntry] = set()
+        key = normalize_distribution_name(package_name)
+        for lockfile in sorted(owning):
+            packages = self._lock_entries(lockfile, logger)
+            if packages is None:
+                unreadable.append(lockfile)
+            elif key in packages:
+                matching.append(lockfile)
+                locked_entries.update(packages[key])
+        if unreadable:
+            return self._guess(package_name, "lockfile-unreadable", unreadable)
+        if any(not entry.source_is_pypi or not entry.version for entry in locked_entries):
             if logger:
-                logger.debug(f"PyPI fallback failed for {package_name}: {e}")
+                logger.debug(f"Python lock entry for {package_name} is not a public PyPI release")
+            return self._guess(package_name, "lock-entry-not-pypi-release", matching)
+        versions = sorted({entry.version for entry in locked_entries if entry.version is not None})
+        return self._resolve_from_pypi(package_name, versions, matching, logger)
 
-        # Deduplicate the list while preserving order
-        seen = set()
-        deduplicated = []
-        for name in import_names:
-            if name not in seen:
-                seen.add(name)
-                deduplicated.append(name)
+    def _lock_entries(self, lockfile: str, logger: Logger | None) -> dict[str, set[LockEntry]] | None:
+        if lockfile not in self._lock_entries_by_lockfile:
+            try:
+                content = self.secure_file_ops.read_file(lockfile)
+                self._lock_entries_by_lockfile[lockfile] = parse_python_lockfile(Path(lockfile).name, content)
+            except (FileOperationError, SecurityError, ValueError) as exc:
+                if logger:
+                    logger.warning(f"Cannot read Python lockfile {lockfile}: {exc}")
+                self._lock_entries_by_lockfile[lockfile] = None
+        return self._lock_entries_by_lockfile[lockfile]
 
-        return deduplicated
+    def _owning_lockfiles(self, directory: Path) -> tuple[str, ...]:
+        while True:
+            if directory not in self._lockfiles_by_directory:
+                entries = self.secure_file_ops.list_dir(directory)
+                self._lockfiles_by_directory[directory] = tuple(sorted(
+                    (directory / entry.name).relative_to(self.secure_file_ops.repo_path).as_posix()
+                    for entry in entries if entry.name in PYTHON_LOCKFILE_NAMES
+                ))
+            lockfiles = self._lockfiles_by_directory[directory]
+            if lockfiles or directory == self.secure_file_ops.repo_path:
+                return lockfiles
+            directory = directory.parent
 
+    def _guess(self, package_name: str, reason: str, lockfiles: list[str]) -> tuple[list[str], GuessResolution]:
+        receipt: GuessResolution = {
+            "source": "name-guess", "versions": [], "lockfiles": lockfiles, "reason": reason,
+        }
+        return self._process_distribution_name(package_name), receipt
 
-def transform_package_name(pkg_name):
-    """
-    Transform a PyPI package name to a potential import name using heuristics
-
-    Applies common naming patterns to convert distribution names to import names:
-    - Strips 'python-' prefix when present
-    - Strips '-bot' suffix for certain packages
-    - Replaces dashes with underscores
-
-    Args:
-        pkg_name (str): PyPI distribution package name
-
-    Returns:
-        Transformed import name based on common patterns
-    """
-    if pkg_name.startswith("python-"):
-        name = pkg_name[len("python-") :]
-        if name.endswith("-bot"):
-            name = name[: -len("-bot")]
-        return name
-    return pkg_name.replace("-", "_")
+    def _resolve_from_pypi(
+        self, package_name: str, locked_versions: list[str], lockfiles: list[str], logger: Logger | None,
+    ) -> tuple[list[str], MetadataResolution | GuessResolution]:
+        names: set[str] = set()
+        versions: set[str] = set()
+        requested_versions: list[str | None] = list(locked_versions) if locked_versions else [None]
+        for version in requested_versions:
+            try:
+                resolved = resolve_python_import_names(package_name, version, logger)
+            except Exception as exc:
+                # Archive decoding errors must not abort repository analysis
+                if logger:
+                    logger.warning(f"Python metadata lookup failed for {package_name}: {exc}")
+                resolved = None
+            if resolved is None:
+                return self._guess(package_name, "pypi-metadata-unavailable", lockfiles)
+            names.update(resolved.names)
+            versions.add(resolved.version)
+        receipt: MetadataResolution = {
+            "source": "pypi:locked-version" if locked_versions else "pypi:latest",
+            "versions": sorted(versions),
+            "lockfiles": lockfiles,
+        }
+        return sorted(names), receipt
 
 
 def infer_top_level_names_from_paths(paths, package_name=None, logger=None):
@@ -218,11 +296,11 @@ def infer_top_level_names_from_paths(paths, package_name=None, logger=None):
 
     Analyzes the structure of files in a Python package archive to determine
     the intended import names. Uses multiple strategies including common prefix
-    detection, __init__.py discovery, and fallback transformations
+    detection and __init__.py discovery
 
     Args:
         paths (list): List of file paths from the package archive
-        package_name (str): Optional package name for fallback transformations
+        package_name (str): Distribution name, unused during path inference
         logger (Logger): Optional logger instance
 
     Returns:
@@ -295,11 +373,6 @@ def infer_top_level_names_from_paths(paths, package_name=None, logger=None):
             if name != "__init__":
                 candidates.add(name)
     candidates = sorted(candidates)
-    # If we have many fragmented candidates, try a fallback transformation
-    if len(candidates) > 3 and package_name is not None:
-        fallback = transform_package_name(package_name)
-        logger and logger.info(f"Falling back to transformation for {package_name} -> {fallback}")
-        return [fallback]
     return candidates
 
 
@@ -444,7 +517,7 @@ def choose_sdist_file(release_files, logger=None):
     return None, None
 
 
-def resolve_python_import_names(package_name, version_override=None, logger=None):
+def resolve_python_import_names(package_name, version_override=None, logger=None) -> ImportNames | None:
     """
     Resolve top-level import names for a PyPI package by analyzing its distribution
 
@@ -457,7 +530,7 @@ def resolve_python_import_names(package_name, version_override=None, logger=None
         logger (Logger): Optional logger instance
 
     Returns:
-        List of resolved import names, or empty list if resolution fails
+        ImportNames with the actual release version, or None if resolution fails
     """
     pypi_url = f"https://pypi.org/pypi/{package_name}/json"
     logger and logger.debug(f"Fetching PyPI metadata for {package_name}")
@@ -465,20 +538,20 @@ def resolve_python_import_names(package_name, version_override=None, logger=None
     try:
         response = requests.get(pypi_url, timeout=10)
         response.raise_for_status()
+        data = response.json()
     except Exception as e:
         logger and logger.error(f"Failed to fetch metadata for {package_name}: {e}")
-        return []
+        return None
 
-    data = response.json()
     version = version_override if version_override else data.get("info", {}).get("version")
     if not version:
         logger and logger.error(f"No version information available for {package_name}")
-        return []
+        return None
 
     release_files = data.get("releases", {}).get(version, [])
     if not release_files:
         logger and logger.error(f"No files found for {package_name} version {version}")
-        return []
+        return None
 
     archive_url = choose_wheel_file(release_files, logger)
     archive_format = "zip"
@@ -488,7 +561,7 @@ def resolve_python_import_names(package_name, version_override=None, logger=None
         archive_url, archive_format = choose_sdist_file(release_files, logger)
         if not archive_url:
             logger and logger.debug(f"No suitable archive (wheel or sdist) for {package_name} version {version}")
-            return []
+            return None
         logger and logger.debug(f"Using sdist from {archive_url}")
 
     try:
@@ -496,24 +569,11 @@ def resolve_python_import_names(package_name, version_override=None, logger=None
         archive_response.raise_for_status()
     except Exception as e:
         logger and logger.error(f"Failed to download archive from {archive_url}: {e}")
-        return []
+        return None
 
     candidates = get_archive_import_names(archive_response.content, archive_format, package_name, logger)
-    # If inference returns many fragmented candidates, try a fallback transform
-    if len(candidates) > 3:
-        fallback = transform_package_name(package_name)
-        logger and logger.debug(
-            f"Candidates appear fragmented; using fallback transformation for {package_name} -> {fallback}"
-        )
-        return [fallback]
-
-    # Don't add the original package_name as-is if it's not already in candidates
-    # Instead, transform it to replace dashes with underscores which is more likely to match import names
-    transformed_name = transform_package_name(package_name)
-
-    # Combine and deduplicate
-    results = list(candidates)
-    if transformed_name not in results:
-        results.append(transformed_name)
-
-    return results
+    if not candidates or any(not name.isidentifier() for name in candidates):
+        if logger:
+            logger.warning(f"No usable top-level import names in the archive for {package_name} {version}")
+        return None
+    return ImportNames(tuple(sorted(set(candidates))), version)

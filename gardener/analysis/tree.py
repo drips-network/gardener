@@ -30,7 +30,7 @@ class RepositoryAnalyzer:
     Coordinates the analysis of repository source code to extract dependencies
     """
 
-    def __init__(self, repo_path, focus_languages=None, logger=None, scope_filter=None):
+    def __init__(self, repo_path, focus_languages=None, logger=None, scope_filter=None, *, python_environment=None):
         """
         Initialize a new analyzer instance
 
@@ -39,6 +39,7 @@ class RepositoryAnalyzer:
             focus_languages (list|None): Optional list of languages to focus on
             logger (Logger|None): Optional logger instance
             scope_filter (ScopeFilter|None): Scope filter controlling active evidence inputs
+            python_environment (PythonEnvironment|None): Explicitly selected installed metadata
 
         Returns:
             None
@@ -46,6 +47,7 @@ class RepositoryAnalyzer:
         self.repo_path = repo_path
         self.logger = logger
         self.focus_languages = focus_languages
+        self.python_environment = python_environment
         self.scope_filter = scope_filter or ScopeFilter.all()
 
         try:
@@ -217,7 +219,7 @@ class RepositoryAnalyzer:
             self._solidity_candidates_from_remappings(remap_dict, source_name, sol_handler)
 
         self.external_packages = manifests.attach_import_names(
-            self.external_packages, self.secure_file_ops, self.logger
+            self.external_packages, self.secure_file_ops, self.logger, self.python_environment
         )
 
         base_url, paths = js_ts_aliases.parse_ts_js_config(

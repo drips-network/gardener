@@ -38,6 +38,7 @@ python tests/run_tests.py --unit|--integration|--fixtures|--system|--all [-v] [-
 ## Determinism
 
 * **No live network**: registry/HTML fetches are stubbed via `tests.support.fixtures.offline_mode`; URL-resolution tests cover receipt sources, cache states, and resolver failure reasons
+* Python import-name contract tests use `tests.support.fixtures.fake_pypi` to serve in-memory wheels and record requests. Their CLI persistence test also stubs repository-URL resolution.
 * **Stable graph serialization**: nodes/edges are sorted
 * Resource limits and timeouts are enforced to avoid flakiness.
 

@@ -53,6 +53,7 @@ python -m gardener.main_cli https://github.com/owner/repo
 * `--machine-summary` - Also write `output/<prefix>_dependency_summary.json`, a compact machine-readable summary
 * `--scope SCOPES` - Analyze only comma-separated path scopes such as `production`, `tests`, or `fixtures`; `all` includes every scope
 * `--exclude-scope SCOPES` - Exclude comma-separated path scopes from analysis
+* `--python-env PATH` - Read Python import names from an explicitly selected environment, such as `.venv`
 * `--visualize` - Generate interactive graph visualization (requires '[.viz]' extra)
 
 **Outputs**:
@@ -62,6 +63,8 @@ python -m gardener.main_cli https://github.com/owner/repo
 * `output/<prefix>_dependency_graph.html` (if '--visualize' is used and '.[viz]' is installed)
 
 Each dependency is classified by kind: `package-manager`, `builtin` (runtime/platform modules like `fs` or `os`), `local`, or `unknown`. Builtins can rank highly because source files import them frequently; their classification helps consumers distinguish runtime reliance from third-party packages.
+
+Python import names use the selected environment first, then versions from `uv.lock`, `poetry.lock`, or `pylock.toml`, and latest PyPI when no lock entry exists. The full JSON records the source and release versions in each Python package's `import_name_resolution`. See [Python resolution](./gardener/README.md#python-import-name-resolution) for details.
 
 ### Microservice
 
